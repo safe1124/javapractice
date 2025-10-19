@@ -155,15 +155,133 @@ const slashCommands = [
     .setName('level')
     .setDescription('あなたと全員のレベルを表示します')
     .setDMPermission(false),
+  new SlashCommandBuilder()
+    .setName('balance')
+    .setDescription('あなたの所持金を確認します')
+    .setDMPermission(false),
+  new SlashCommandBuilder()
+    .setName('shop')
+    .setDescription('アイテムショップを表示します')
+    .setDMPermission(false),
+  new SlashCommandBuilder()
+    .setName('buy')
+    .setDescription('アイテムを購入します')
+    .addStringOption((option) =>
+      option
+        .setName('item')
+        .setDescription('購入したいアイテムのID')
+        .setRequired(true)
+        .addChoices(
+          { name: '🔴 赤色 (500円)', value: 'color_red' },
+          { name: '🟢 緑色 (500円)', value: 'color_green' },
+          { name: '🔵 青色 (500円)', value: 'color_blue' },
+          { name: '🟡 黄色 (500円)', value: 'color_yellow' },
+          { name: '🟣 紫色 (500円)', value: 'color_purple' },
+          { name: '🟠 オレンジ色 (500円)', value: 'color_orange' },
+          { name: '⚫ 黒色 (500円)', value: 'color_black' },
+          { name: '⚪ 白色 (500円)', value: 'color_white' },
+          { name: '🌟 勉強王 (1000円)', value: 'title_king' },
+          { name: '🔥 努力家 (1000円)', value: 'title_hard' },
+          { name: '💎 天才 (1000円)', value: 'title_genius' },
+          { name: '👑 チャンピオン (1000円)', value: 'title_champion' },
+          { name: '⚡ スピードスター (1000円)', value: 'title_speed' },
+          { name: '🎯 集中マスター (1000円)', value: 'title_focus' }
+        )
+    )
+    .setDMPermission(false),
+  new SlashCommandBuilder()
+    .setName('inventory')
+    .setDescription('所有しているアイテムを確認します')
+    .setDMPermission(false),
+  new SlashCommandBuilder()
+    .setName('equip')
+    .setDescription('購入したアイテムを装備します')
+    .addStringOption((option) =>
+      option
+        .setName('item')
+        .setDescription('装備したいアイテムのID')
+        .setRequired(true)
+    )
+    .setDMPermission(false),
 ].map((command) => command.toJSON());
 
 let commandsReady = false;
+
+// 色ロール自動作成関数
+async function ensureColorRolesExist(guild) {
+  const colorRoles = {
+    Role_Red: '0xFF0000',
+    Role_Green: '0x00FF00',
+    Role_Blue: '0x0000FF',
+    Role_Yellow: '0xFFFF00',
+    Role_Purple: '0x9B59B6',
+    Role_Orange: '0xFF8C00',
+    Role_Black: '0x000000',
+    Role_White: '0xFFFFFF'
+  };
+
+  const titleRoles = {
+    Role_Title_King: '0x FFD700',      // ゴールド
+    Role_Title_Hard: '0xFF6347',       // トマト赤
+    Role_Title_Genius: '0x9370DB',     // 中紫
+    Role_Title_Champion: '0x1E90FF',   // ドジャーブルー
+    Role_Title_Speed: '0x00CED1',      // ダークターコイズ
+    Role_Title_Focus: '0x32CD32'       // ライムグリーン
+  };
+
+  console.log('🔍 色ロールを確認中...');
+
+  for (const [roleName, colorHex] of Object.entries(colorRoles)) {
+    const existingRole = guild.roles.cache.find(r => r.name === roleName);
+    
+    if (!existingRole) {
+      try {
+        const color = parseInt(colorHex.replace('0x', ''), 16);
+        const newRole = await guild.roles.create({
+          name: roleName,
+          color: color,
+          reason: '色アイテム用ロール'
+        });
+        console.log(`✅ ロール "${roleName}" を作成しました`);
+      } catch (error) {
+        console.error(`❌ ロール "${roleName}" の作成に失敗しました:`, error.message);
+      }
+    } else {
+      console.log(`✅ ロール "${roleName}" は既に存在します`);
+    }
+  }
+
+  console.log('🔍 称号ロールを確認中...');
+
+  for (const [roleName, colorHex] of Object.entries(titleRoles)) {
+    const existingRole = guild.roles.cache.find(r => r.name === roleName);
+    
+    if (!existingRole) {
+      try {
+        const color = parseInt(colorHex.replace('0x', ''), 16);
+        const newRole = await guild.roles.create({
+          name: roleName,
+          color: color,
+          reason: '称号アイテム用ロール'
+        });
+        console.log(`✅ ロール "${roleName}" を作成しました`);
+      } catch (error) {
+        console.error(`❌ ロール "${roleName}" の作成に失敗しました:`, error.message);
+      }
+    } else {
+      console.log(`✅ ロール "${roleName}" は既に存在します`);
+    }
+  }
+}
 
 client.once('clientReady', async () => {
   console.log(`ログイン完了：${client.user.tag}`);
   try {
     const guild = client.guilds.cache.get(GUILD_ID);
     if (guild) {
+      // 色ロールを自動作成
+      await ensureColorRolesExist(guild);
+      
       const existingCommands = await guild.commands.fetch();
       console.log(`🔍 既存のスラッシュコマンド数: ${existingCommands.size}`);
       
@@ -526,6 +644,21 @@ client.on('interactionCreate', async (interaction) => {
         break;
       case 'level':
         await showLevel(interaction);
+        break;
+      case 'balance':
+        await showBalance(interaction);
+        break;
+      case 'shop':
+        await showShop(interaction);
+        break;
+      case 'buy':
+        await buyItem(interaction);
+        break;
+      case 'inventory':
+        await showInventory(interaction);
+        break;
+      case 'equip':
+        await equipItem(interaction);
         break;
       default:
         break;
@@ -1102,6 +1235,31 @@ async function showStats(interaction) {
 
     const totalMinutes = totalStudyData?.total_minutes || 0;
 
+    // ユーザーのカスタマイズアイテムを取得
+    const { data: customizations } = await supabase
+      .from('user_customizations')
+      .select('item_type, item_value')
+      .eq('user_id', userId)
+      .eq('is_active', true);
+
+    // 色とタイトルを取得
+    let embedColor = COLOR_PRIMARY; // デフォルト色
+    let userTitle = ''; // デフォルトタイトル
+
+    if (customizations && customizations.length > 0) {
+      const colorItem = customizations.find(item => item.item_type === 'color');
+      const titleItem = customizations.find(item => item.item_type === 'title');
+
+      if (colorItem) {
+        // 色の値を16進数に変換
+        embedColor = parseInt(colorItem.item_value, 16);
+      }
+
+      if (titleItem) {
+        userTitle = titleItem.item_value + ' ';
+      }
+    }
+
     // レベルバー表示用（5レベル = 10個の四角）
     // 現在の5レベルブロック内でのレベルを計算
     const levelInBlock = ((userLevel - 1) % 5) + 1; // 1-5の中でのレベル
@@ -1111,16 +1269,16 @@ async function showStats(interaction) {
     const filledSquares = Math.floor(secondsInBlock / 30); // 30秒 = 1個の四角
     const emptySquares = 10 - filledSquares;
     const levelBar = '█'.repeat(filledSquares) + '░'.repeat(emptySquares);
-    
+
     // 次のレベルに必要な総時間を計算（5分 = 1レベル）
     const nextLevelRequiredMinutes = (userLevel) * 5;
     const remainingMinutesForNextLevel = Math.max(0, nextLevelRequiredMinutes - totalMinutes);
-    
+
     console.log(`✅ Stats取得完了: today=${todayTotal}, week=${weekTotal}, month=${monthTotal}, level=${userLevel}, totalMinutes=${totalMinutes}`);
 
     const statsEmbed = new EmbedBuilder()
-      .setColor(0x5865f2)
-      .setTitle(`📊 学習記録 - ${userDisplayName}`)
+      .setColor(embedColor)
+      .setTitle(`📊 学習記録 - ${userTitle}${userDisplayName}`)
       .setDescription('Asia/Seoul時間で集計しています。')
       .addFields(
         {
@@ -2285,5 +2443,443 @@ async function showLevel(interaction) {
   } catch (error) {
     console.error('showLevelでエラーが発生しました', error);
     await sendEmbed(interaction, buildErrorEmbed('レベル情報の取得に失敗しました。後ほどお試しください。'));
+  }
+}
+
+// ==================== ショップシステム ====================
+
+// アイテムデータベース
+const SHOP_ITEMS = {
+  // 色アイテム
+  color_red: { name: '🔴 赤色', price: 500, type: 'color', value: '0xFF0000' },
+  color_green: { name: '🟢 緑色', price: 500, type: 'color', value: '0x00FF00' },
+  color_blue: { name: '🔵 青色', price: 500, type: 'color', value: '0x0000FF' },
+  color_yellow: { name: '🟡 黄色', price: 500, type: 'color', value: '0xFFFF00' },
+  color_purple: { name: '🟣 紫色', price: 500, type: 'color', value: '0x9B59B6' },
+  color_orange: { name: '🟠 オレンジ色', price: 500, type: 'color', value: '0xFF8C00' },
+  color_black: { name: '⚫ 黒色', price: 500, type: 'color', value: '0x000000' },
+  color_white: { name: '⚪ 白色', price: 500, type: 'color', value: '0xFFFFFF' },
+
+  // 称号アイテム
+  title_king: { name: '🌟 勉強王', price: 1000, type: 'title', value: '🌟 勉強王' },
+  title_hard: { name: '🔥 努力家', price: 1000, type: 'title', value: '🔥 努力家' },
+  title_genius: { name: '💎 天才', price: 1000, type: 'title', value: '💎 天才' },
+  title_champion: { name: '👑 チャンピオン', price: 1000, type: 'title', value: '👑 チャンピオン' },
+  title_speed: { name: '⚡ スピードスター', price: 1000, type: 'title', value: '⚡ スピードスター' },
+  title_focus: { name: '🎯 集中マスター', price: 1000, type: 'title', value: '🎯 集中マスター' }
+};
+
+// 色アイテムとDiscordロールのマッピング
+const COLOR_ROLE_MAP = {
+  color_red: 'Role_Red',
+  color_green: 'Role_Green',
+  color_blue: 'Role_Blue',
+  color_yellow: 'Role_Yellow',
+  color_purple: 'Role_Purple',
+  color_orange: 'Role_Orange',
+  color_black: 'Role_Black',
+  color_white: 'Role_White'
+};
+
+// 称号アイテムとDiscordロールのマッピング
+const TITLE_ROLE_MAP = {
+  title_king: 'Role_Title_King',
+  title_hard: 'Role_Title_Hard',
+  title_genius: 'Role_Title_Genius',
+  title_champion: 'Role_Title_Champion',
+  title_speed: 'Role_Title_Speed',
+  title_focus: 'Role_Title_Focus'
+};
+
+// 残高確認コマンド
+async function showBalance(interaction) {
+  try {
+    const userId = interaction.user.id;
+
+    // お金のデータを取得
+    const { data: moneyData, error } = await supabase
+      .from('money')
+      .select('balance, total_earned')
+      .eq('user_id', userId)
+      .single();
+
+    if (error && error.code !== 'PGRST116') {
+      throw error;
+    }
+
+    const balance = moneyData?.balance || 0;
+    const totalEarned = moneyData?.total_earned || 0;
+
+    const balanceEmbed = new EmbedBuilder()
+      .setColor(COLOR_SUCCESS)
+      .setTitle('💰 所持金')
+      .setDescription(`${interaction.user.username}さんの財布`)
+      .addFields(
+        {
+          name: '💵 現在の残高',
+          value: `**${balance.toLocaleString()}円**`,
+          inline: true
+        },
+        {
+          name: '📊 累計獲得',
+          value: `${totalEarned.toLocaleString()}円`,
+          inline: true
+        }
+      )
+      .setThumbnail(interaction.user.displayAvatarURL())
+      .setFooter({ text: '勉強するとお金がもらえます！' })
+      .setTimestamp(new Date());
+
+    await sendEmbed(interaction, balanceEmbed);
+  } catch (error) {
+    console.error('showBalanceでエラーが発生しました', error);
+    await sendEmbed(interaction, buildErrorEmbed('残高の取得に失敗しました。'));
+  }
+}
+
+// ショップ表示コマンド
+async function showShop(interaction) {
+  try {
+    const userId = interaction.user.id;
+
+    // 現在の残高を取得
+    const { data: moneyData } = await supabase
+      .from('money')
+      .select('balance')
+      .eq('user_id', userId)
+      .single();
+
+    const balance = moneyData?.balance || 0;
+
+    // 所有しているアイテムを取得
+    const { data: ownedItems } = await supabase
+      .from('user_customizations')
+      .select('item_id')
+      .eq('user_id', userId);
+
+    const ownedItemIds = new Set(ownedItems?.map(item => item.item_id) || []);
+
+    // 色アイテム一覧
+    let colorList = '**🎨 色アイテム (500円)**\n';
+    Object.entries(SHOP_ITEMS).forEach(([id, item]) => {
+      if (item.type === 'color') {
+        const owned = ownedItemIds.has(id) ? '✅' : '';
+        colorList += `\`${id}\` - ${item.name} ${owned}\n`;
+      }
+    });
+
+    // 称号アイテム一覧
+    let titleList = '**👑 称号アイテム (1000円)**\n';
+    Object.entries(SHOP_ITEMS).forEach(([id, item]) => {
+      if (item.type === 'title') {
+        const owned = ownedItemIds.has(id) ? '✅' : '';
+        titleList += `\`${id}\` - ${item.name} ${owned}\n`;
+      }
+    });
+
+    const shopEmbed = new EmbedBuilder()
+      .setColor(COLOR_PRIMARY)
+      .setTitle('🏪 アイテムショップ')
+      .setDescription(`現在の所持金: **${balance.toLocaleString()}円**\n\n購入するには \`/buy <アイテムID>\` を使用してください`)
+      .addFields(
+        {
+          name: colorList.split('\n')[0],
+          value: colorList.split('\n').slice(1).join('\n') || 'なし',
+          inline: false
+        },
+        {
+          name: titleList.split('\n')[0],
+          value: titleList.split('\n').slice(1).join('\n') || 'なし',
+          inline: false
+        }
+      )
+      .setFooter({ text: '✅は購入済みのアイテムです' })
+      .setTimestamp(new Date());
+
+    await sendEmbed(interaction, shopEmbed);
+  } catch (error) {
+    console.error('showShopでエラーが発生しました', error);
+    await sendEmbed(interaction, buildErrorEmbed('ショップの表示に失敗しました。'));
+  }
+}
+
+// アイテム購入コマンド
+async function buyItem(interaction) {
+  try {
+    const userId = interaction.user.id;
+    const itemId = interaction.options.getString('item');
+
+    // アイテムが存在するか確認
+    const item = SHOP_ITEMS[itemId];
+    if (!item) {
+      await sendEmbed(interaction, buildErrorEmbed('そのアイテムは存在しません。'));
+      return;
+    }
+
+    // 残高を確認
+    const { data: moneyData, error: moneyError } = await supabase
+      .from('money')
+      .select('balance')
+      .eq('user_id', userId)
+      .single();
+
+    if (moneyError && moneyError.code !== 'PGRST116') {
+      throw moneyError;
+    }
+
+    const balance = moneyData?.balance || 0;
+
+    if (balance < item.price) {
+      await sendEmbed(interaction, buildErrorEmbed(`お金が足りません！\n必要: ${item.price}円\n所持金: ${balance}円`));
+      return;
+    }
+
+    // 既に所有しているか確認
+    const { data: existingItem } = await supabase
+      .from('user_customizations')
+      .select('item_id')
+      .eq('user_id', userId)
+      .eq('item_id', itemId)
+      .single();
+
+    if (existingItem) {
+      await sendEmbed(interaction, buildErrorEmbed('このアイテムは既に所有しています！'));
+      return;
+    }
+
+    // お金を引く（upsertで更新または挿入）
+    const newBalance = balance - item.price;
+    const { error: updateError } = await supabase
+      .from('money')
+      .upsert({
+        user_id: userId,
+        balance: newBalance,
+        total_earned: moneyData?.total_earned || 0,
+        last_updated: now().toISOString()
+      }, {
+        onConflict: 'user_id'
+      });
+
+    if (updateError) {
+      throw updateError;
+    }
+
+    // アイテムを追加
+    const { error: insertError } = await supabase
+      .from('user_customizations')
+      .insert({
+        user_id: userId,
+        item_id: itemId,
+        item_name: item.name,
+        item_type: item.type,
+        item_value: item.value,
+        purchased_at: now().toISOString(),
+        updated_at: now().toISOString()
+      });
+
+    if (insertError) {
+      throw insertError;
+    }
+
+    const purchaseEmbed = new EmbedBuilder()
+      .setColor(COLOR_SUCCESS)
+      .setTitle('✅ 購入完了！')
+      .setDescription(`**${item.name}** を購入しました！`)
+      .addFields(
+        {
+          name: '💰 支払い額',
+          value: `${item.price}円`,
+          inline: true
+        },
+        {
+          name: '💵 残高',
+          value: `${newBalance.toLocaleString()}円`,
+          inline: true
+        }
+      )
+      .setFooter({ text: '/inventory で所有アイテムを確認できます' })
+      .setTimestamp(new Date());
+
+    await sendEmbed(interaction, purchaseEmbed);
+  } catch (error) {
+    console.error('buyItemでエラーが発生しました', error);
+    await sendEmbed(interaction, buildErrorEmbed('購入に失敗しました。'));
+  }
+}
+
+// インベントリ表示コマンド
+async function showInventory(interaction) {
+  try {
+    const userId = interaction.user.id;
+
+    // 所有アイテムを取得
+    const { data: items, error } = await supabase
+      .from('user_customizations')
+      .select('*')
+      .eq('user_id', userId)
+      .order('purchased_at', { ascending: false });
+
+    if (error) {
+      throw error;
+    }
+
+    if (!items || items.length === 0) {
+      await sendEmbed(interaction, buildInfoEmbed('📦 インベントリ', 'まだアイテムを所有していません。\n`/shop` でアイテムを購入しましょう！'));
+      return;
+    }
+
+    // タイプ別に分類
+    const colorItems = items.filter(item => item.item_type === 'color');
+    const titleItems = items.filter(item => item.item_type === 'title');
+
+    let colorList = '';
+    colorItems.forEach(item => {
+      const activeMarker = item.is_active ? '✅ ' : '  ';
+      colorList += `${activeMarker}${item.item_name} \`/equip ${item.item_id}\`\n`;
+    });
+
+    let titleList = '';
+    titleItems.forEach(item => {
+      const activeMarker = item.is_active ? '✅ ' : '  ';
+      titleList += `${activeMarker}${item.item_name} \`/equip ${item.item_id}\`\n`;
+    });
+
+    const inventoryEmbed = new EmbedBuilder()
+      .setColor(COLOR_PRIMARY)
+      .setTitle('📦 インベントリ')
+      .setDescription(`${interaction.user.username}さんの所有アイテム`)
+      .setThumbnail(interaction.user.displayAvatarURL())
+      .setTimestamp(new Date());
+
+    if (colorList) {
+      inventoryEmbed.addFields({
+        name: '🎨 色アイテム',
+        value: colorList,
+        inline: false
+      });
+    }
+
+    if (titleList) {
+      inventoryEmbed.addFields({
+        name: '👑 称号アイテム',
+        value: titleList,
+        inline: false
+      });
+    }
+
+    inventoryEmbed.setFooter({ text: `合計 ${items.length} 個のアイテムを所有しています` });
+
+    await sendEmbed(interaction, inventoryEmbed);
+  } catch (error) {
+    console.error('showInventoryでエラーが発生しました', error);
+    await sendEmbed(interaction, buildErrorEmbed('インベントリの表示に失敗しました。'));
+  }
+}
+
+async function equipItem(interaction) {
+  try {
+    const userId = interaction.user.id;
+    const itemId = interaction.options.getString('item');
+    const member = interaction.member;
+    const guild = interaction.guild;
+
+    // アイテムが存在するか確認
+    const item = SHOP_ITEMS[itemId];
+    if (!item) {
+      await sendEmbed(interaction, buildErrorEmbed('そのアイテムは存在しません。'));
+      return;
+    }
+
+    // ユーザーがそのアイテムを所有しているか確認
+    const { data: ownedItem, error: selectError } = await supabase
+      .from('user_customizations')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('item_id', itemId)
+      .single();
+
+    if (selectError && selectError.code !== 'PGRST116') {
+      throw selectError;
+    }
+
+    if (!ownedItem) {
+      await sendEmbed(interaction, buildErrorEmbed('このアイテムを所有していません！\n先に `/buy` で購入してください。'));
+      return;
+    }
+
+    // アイテムを活性化（同じタイプの他のアイテムは自動で非活性化される）
+    const { error: updateError } = await supabase
+      .from('user_customizations')
+      .update({ is_active: true })
+      .eq('user_id', userId)
+      .eq('item_id', itemId);
+
+    if (updateError) {
+      throw updateError;
+    }
+
+    // 色アイテムの場合、Discordのロールを付与
+    if (item.type === 'color') {
+      const roleNameToAdd = COLOR_ROLE_MAP[itemId];
+      
+      if (roleNameToAdd) {
+        // 新しいロールを取得
+        const newRole = guild.roles.cache.find(r => r.name === roleNameToAdd);
+        
+        if (newRole) {
+          // 古いロールを全て削除
+          for (const [colorItemId, roleName] of Object.entries(COLOR_ROLE_MAP)) {
+            const oldRole = guild.roles.cache.find(r => r.name === roleName);
+            if (oldRole && member.roles.cache.has(oldRole.id)) {
+              await member.roles.remove(oldRole);
+            }
+          }
+          
+          // 新しいロールを追加
+          await member.roles.add(newRole);
+          console.log(`✅ ユーザー ${userId} に ${roleNameToAdd} ロールを付与しました`);
+        } else {
+          console.warn(`⚠️ ロール ${roleNameToAdd} が見つかりません。事前に作成してください`);
+        }
+      }
+    }
+
+    // 称号アイテムの場合、Discordのロールを付与
+    if (item.type === 'title') {
+      const roleNameToAdd = TITLE_ROLE_MAP[itemId];
+      
+      if (roleNameToAdd) {
+        // 新しいロールを取得
+        const newRole = guild.roles.cache.find(r => r.name === roleNameToAdd);
+        
+        if (newRole) {
+          // 古いロールを全て削除
+          for (const [titleItemId, roleName] of Object.entries(TITLE_ROLE_MAP)) {
+            const oldRole = guild.roles.cache.find(r => r.name === roleName);
+            if (oldRole && member.roles.cache.has(oldRole.id)) {
+              await member.roles.remove(oldRole);
+            }
+          }
+          
+          // 新しいロールを追加
+          await member.roles.add(newRole);
+          console.log(`✅ ユーザー ${userId} に ${roleNameToAdd} ロールを付与しました`);
+        } else {
+          console.warn(`⚠️ ロール ${roleNameToAdd} が見つかりません。事前に作成してください`);
+        }
+      }
+    }
+
+    const equipEmbed = new EmbedBuilder()
+      .setColor(COLOR_SUCCESS)
+      .setTitle('✅ 装備完了！')
+      .setDescription(`**${item.name}** を装備しました！${item.type === 'color' ? '\nニックネーム色が変更されました！' : ''}`)
+      .setFooter({ text: '次回の `/stats` で反映されます' })
+      .setTimestamp(new Date());
+
+    await sendEmbed(interaction, equipEmbed);
+  } catch (error) {
+    console.error('equipItemでエラーが発生しました', error);
+    await sendEmbed(interaction, buildErrorEmbed('アイテムの装備に失敗しました。'));
   }
 }
