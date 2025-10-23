@@ -12,7 +12,7 @@ dayjs.extend(utc);
 dayjs.extend(timezone);
 dayjs.extend(isoWeek);
 
-const TIMEZONE = 'Asia/Seoul';
+const TIMEZONE = 'Asia/Tokyo';
 const COLOR_PRIMARY = 0x5865f2;
 const COLOR_SUCCESS = 0x57f287;
 const COLOR_DANGER = 0xed4245;
@@ -351,7 +351,7 @@ client.on('guildMemberAdd', async (member) => {
           },
           {
             name: '📌 注意事項',
-            value: '⏰ 時間はAsia/Seoul (UTC+9) で集計されます\n📝 詳細は使い方チャンネルをご覧ください\n💬 わからないことがあればお気軽にお聞きください！',
+            value: '⏰ 時間はAsia/Tokyo (UTC+9) で集計されます\n📝 詳細は使い方チャンネルをご覧ください\n💬 わからないことがあればお気軽にお聞きください！',
             inline: false
           }
         )
@@ -1343,7 +1343,7 @@ async function showStats(interaction) {
     const statsEmbed = new EmbedBuilder()
       .setColor(embedColor)
       .setTitle(`📊 学習記録 - ${userTitle}${userDisplayName}`)
-      .setDescription('Asia/Seoul時間で集計しています。')
+      .setDescription('日本時間で集計しています。')
       .addFields(
         {
           name: '🎮 現在のレベル',
