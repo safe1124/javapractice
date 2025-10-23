@@ -1135,13 +1135,13 @@ async function showStats(interaction) {
   try {
     console.log(`📊 Stats取得開始: userId=${userId}`);
 
-    // ユーザー情報を保存
-    await saveDiscordUser(
+    // ユーザー情報を保存（バックグラウンドで実行）
+    saveDiscordUser(
       userId,
       interaction.user.username,
       interaction.user.globalName || interaction.user.displayName || interaction.user.username,
       interaction.user.displayAvatarURL()
-    );
+    ).catch(err => console.error('saveDiscordUser error:', err));
 
     // 今週の範囲を計算
     const weekStart = nowDate.startOf('isoWeek'); // 月曜日
