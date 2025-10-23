@@ -26,21 +26,6 @@ const supabase = createClient(
 
 console.log('☁️ Supabaseデータベースを使用します');
 
-// この関数は分数でティアを決定します
-function getTierByMinutes(minutes) {
-  const safeMinutes = Math.max(Number(minutes) || 0, 0);
-  
-  if (safeMinutes >= 70 * 60) return 'チャレンジャー 🔥';
-  if (safeMinutes >= 60 * 60) return 'グランドマスター 👑';
-  if (safeMinutes >= 50 * 60) return 'マスター ⭐';
-  if (safeMinutes >= 40 * 60) return 'ダイヤモンド 💎';
-  if (safeMinutes >= 30 * 60) return 'プラチナ 🤍';
-  if (safeMinutes >= 20 * 60) return 'ゴールド 🏆';
-  if (safeMinutes >= 10 * 60) return 'シルバー 🥈';
-  if (safeMinutes >= 5 * 60) return 'ブロンズ 🥉';
-  return 'ノービス 🌱';
-}
-
 const activeSessions = new Map();
 const voiceSessions = new Map();
 const pomodoroSessions = new Map();
@@ -579,8 +564,8 @@ client.on('interactionCreate', async (interaction) => {
     return;
   }
 
-  // todoadd, todolist, todocomplete, tododelete, todoend는 즉시 defer
-  if (['todoadd', 'todolist', 'todocomplete', 'tododelete', 'todoend'].includes(interaction.commandName)) {
+  // todoadd, todolist, todocomplete, tododelete, todoend, stats는 즉시 defer
+  if (['todoadd', 'todolist', 'todocomplete', 'tododelete', 'todoend', 'stats', 'rank', 'globalstats'].includes(interaction.commandName)) {
     try {
       await interaction.deferReply();
       const deferTime = Date.now() - startTime;
@@ -1093,62 +1078,42 @@ async function stopStudy(interaction) {
 }
 
 async function showRank(interaction) {
-  const nowDate = now();
-  const monthKey = getMonthKey(nowDate);
-
   try {
-    if (!interaction.replied && !interaction.deferred) {
-      await interaction.deferReply();
-    }
-    
-    console.log(`📊 Rank取得開始: month=${monthKey}`);
-    
-    // Supabaseから月別データ取得
-    const { data, error } = await supabase
-      .from('study_records')
-      .select('user_id, total_minutes')
-      .eq('month', monthKey);
-    
-    if (error) throw error;
-    
-    // ユーザー別に集計
-    const userTotals = {};
-    data.forEach(row => {
-      if (!userTotals[row.user_id]) {
-        userTotals[row.user_id] = 0;
-      }
-      userTotals[row.user_id] += row.total_minutes;
-    });
-    
-    // ランキング配列に変換
-    const ranking = Object.entries(userTotals)
-      .map(([user_id, total]) => ({ user_id, total }))
-      .sort((a, b) => b.total - a.total);
+    console.log(`📊 Rank取得開始`);
 
-    if (!ranking.length) {
-      const emptyEmbed = buildInfoEmbed('ティアランキング', '今月の記録がまだありません。`/startstudy`で勉強を始めましょう！');
+    // 全ユーザーのレベル情報を取得
+    const { data: users, error } = await supabase
+      .from('discord_users')
+      .select('user_id, username, display_name, level')
+      .order('level', { ascending: false });
+
+    if (error) throw error;
+
+    if (!users || users.length === 0) {
+      const emptyEmbed = buildInfoEmbed('レベルランキング', 'まだユーザー記録がありません。`/startstudy`で勉強を始めましょう！');
       await sendEmbed(interaction, emptyEmbed);
       return;
     }
 
-    const rankingLines = ranking.map((row) => {
-      const tier = getTierByMinutes(row.total);
-      const totalText = formatMinutes(row.total);
-      return `**${tier}** - <@${row.user_id}>：${totalText}`;
+    const rankingLines = users.map((user, index) => {
+      const tier = getTierByLevel(user.level);
+      const displayName = user.display_name || user.username || `User ${user.user_id}`;
+      const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `${index + 1}.`;
+      return `${medal} **${tier}** (Lv.${user.level}) - ${displayName}`;
     });
 
     const rankEmbed = new EmbedBuilder()
       .setColor(COLOR_PRIMARY)
-      .setTitle('今月の勉強ティアランキング 📊')
-      .setDescription(`${monthKey} の月間勉強時間に基づくティアランキング`)
-      .addFields({ 
-        name: 'ティア別ランキング', 
+      .setTitle('📊 レベルランキング')
+      .setDescription('全ユーザーのレベル順位')
+      .addFields({
+        name: 'ランキング',
         value: rankingLines.join('\n'),
         inline: false
       })
       .addFields({
-        name: 'ティア別条件',
-        value: '🌱 ノービス (5時間未満)\n🥉 ブロンズ (5時間以上)\n🥈 シルバー (10時間以上)\n🏆 ゴールド (20時間以上)\n🤍 プラチナ (30時間以上)\n💎 ダイヤモンド (40時間以上)\n👑 グランドマスター (60時間以上)\n🔥 チャレンジャー (70時間以上)',
+        name: 'ティア一覧',
+        value: '**Bronze** 5-1 (Lv.1-50)\n**Silver** 5-1 (Lv.51-100)\n**Gold** 5-1 (Lv.101-150)\n**Platinum** 5-1 (Lv.151-200)\n**Diamond** 5-1 (Lv.201-225)\n**Master** 5-1 (Lv.226-238)\n**Champion** (Lv.239-244)\n**Challenger** (Lv.245-250)',
         inline: false
       })
       .setTimestamp(new Date());
@@ -1168,12 +1133,8 @@ async function showStats(interaction) {
   const monthKey = getMonthKey(nowDate);
 
   try {
-    if (!interaction.replied && !interaction.deferred) {
-      await interaction.deferReply();
-    }
-    
     console.log(`📊 Stats取得開始: userId=${userId}`);
-    
+
     // ユーザー情報を保存
     await saveDiscordUser(
       userId,
@@ -1181,66 +1142,117 @@ async function showStats(interaction) {
       interaction.user.globalName || interaction.user.displayName || interaction.user.username,
       interaction.user.displayAvatarURL()
     );
-    
-    // 今日
-    const { data: todayData, error: todayError } = await supabase
-      .from('study_records')
-      .select('total_minutes')
-      .eq('user_id', userId)
-      .eq('date', dateKey);
-    
+
+    // 今週の範囲を計算
+    const weekStart = nowDate.startOf('isoWeek'); // 月曜日
+    const weekEnd = weekStart.add(6, 'day');
+    const weekStartKey = getDateKey(weekStart);
+    const weekEndKey = getDateKey(weekEnd);
+
+    // 先週のキーを計算
+    const lastWeekDate = nowDate.subtract(1, 'week');
+    const lastWeekKey = getWeekKey(lastWeekDate);
+
+    // すべてのクエリを並列実行
+    const [
+      { data: todayData, error: todayError },
+      { data: weeklyData },
+      { data: weekData, error: weekError },
+      { data: lastWeekData },
+      { data: monthData, error: monthError },
+      { data: userData, error: userError },
+      { data: totalStudyData, error: totalStudyError },
+      { data: customizations }
+    ] = await Promise.all([
+      // 今日のデータ
+      supabase
+        .from('study_records')
+        .select('total_minutes, start_time, end_time')
+        .eq('user_id', userId)
+        .eq('date', dateKey),
+      // 今週全体のデータ（グラフ用）
+      supabase
+        .from('study_records')
+        .select('date, total_minutes')
+        .eq('user_id', userId)
+        .gte('date', weekStartKey)
+        .lte('date', weekEndKey),
+      // 今週の合計
+      supabase
+        .from('study_records')
+        .select('total_minutes')
+        .eq('user_id', userId)
+        .eq('week', weekKey),
+      // 先週の合計
+      supabase
+        .from('study_records')
+        .select('total_minutes')
+        .eq('user_id', userId)
+        .eq('week', lastWeekKey),
+      // 今月の合計
+      supabase
+        .from('study_records')
+        .select('total_minutes')
+        .eq('user_id', userId)
+        .eq('month', monthKey),
+      // ユーザーレベル
+      supabase
+        .from('discord_users')
+        .select('level, display_name')
+        .eq('user_id', userId)
+        .maybeSingle(),
+      // 総勉強時間
+      supabase
+        .from('user_total_study_time')
+        .select('total_minutes')
+        .eq('user_id', userId)
+        .maybeSingle(),
+      // カスタマイズアイテム
+      supabase
+        .from('user_customizations')
+        .select('item_type, item_value')
+        .eq('user_id', userId)
+        .eq('is_active', true)
+    ]);
+
+    // エラーチェック
     if (todayError) throw todayError;
-    const todayTotal = todayData.reduce((sum, row) => sum + row.total_minutes, 0);
-    
-    // 今週
-    const { data: weekData, error: weekError } = await supabase
-      .from('study_records')
-      .select('total_minutes')
-      .eq('user_id', userId)
-      .eq('week', weekKey);
-    
     if (weekError) throw weekError;
-    const weekTotal = weekData.reduce((sum, row) => sum + row.total_minutes, 0);
-    
-    // 今月
-    const { data: monthData, error: monthError } = await supabase
-      .from('study_records')
-      .select('total_minutes')
-      .eq('user_id', userId)
-      .eq('month', monthKey);
-    
     if (monthError) throw monthError;
-    const monthTotal = monthData.reduce((sum, row) => sum + row.total_minutes, 0);
-    
-    // ユーザーレベルと総時間を取得
-    const { data: userData, error: userError } = await supabase
-      .from('discord_users')
-      .select('level, display_name')
-      .eq('user_id', userId)
-      .maybeSingle();
-
     if (userError) throw userError;
-
-    const userLevel = userData?.level || 1;
-    const userDisplayName = userData?.display_name || interaction.user.username;
-
-    // 総勉強時間を取得
-    const { data: totalStudyData, error: totalStudyError } = await supabase
-      .from('user_total_study_time')
-      .select('total_minutes')
-      .eq('user_id', userId)
-      .maybeSingle();
-
     if (totalStudyError) throw totalStudyError;
 
-    const totalMinutes = totalStudyData?.total_minutes || 0;
+    // 今日の合計と最高集中力
+    const todayTotal = todayData.reduce((sum, row) => sum + row.total_minutes, 0);
+    let maxFocusMinutes = 0;
+    if (todayData.length > 0) {
+      maxFocusMinutes = Math.max(...todayData.map(row => row.total_minutes));
+    }
 
-    // ユーザーのカスタマイズアイテムを取得
-    const { data: customizations } = await supabase
-      .from('user_customizations')
-      .select('item_type, item_value')
-      .eq('user_id', userId)
-      .eq('is_active', true);
+    // 曜日ごとに集計
+    const weeklyGraph = [];
+    for (let i = 0; i < 7; i++) {
+      const targetDate = weekStart.add(i, 'day');
+      const targetDateKey = getDateKey(targetDate);
+
+      const dayTotal = weeklyData
+        ? weeklyData
+            .filter(row => row.date === targetDateKey)
+            .reduce((sum, row) => sum + row.total_minutes, 0)
+        : 0;
+
+      weeklyGraph.push({ day: i, minutes: dayTotal });
+    }
+
+    // 週・月の合計
+    const weekTotal = weekData.reduce((sum, row) => sum + row.total_minutes, 0);
+    const lastWeekTotal = lastWeekData ? lastWeekData.reduce((sum, row) => sum + row.total_minutes, 0) : 0;
+    const monthTotal = monthData.reduce((sum, row) => sum + row.total_minutes, 0);
+
+    // ユーザー情報
+    const userLevel = userData?.level || 1;
+    const userDisplayName = userData?.display_name || interaction.user.username;
+    const totalMinutes = totalStudyData?.total_minutes || 0;
 
     // 色とタイトルを取得
     let embedColor = COLOR_PRIMARY; // デフォルト色
@@ -1261,18 +1273,70 @@ async function showStats(interaction) {
     }
 
     // レベルバー表示用（5レベル = 10個の四角）
-    // 現在の5レベルブロック内でのレベルを計算
-    const levelInBlock = ((userLevel - 1) % 5) + 1; // 1-5の中でのレベル
-    // 現在の5レベルブロック内での秒数を計算（30秒 = 1個の四角）
-    const minutesInBlock = totalMinutes % 150; // 5レベル = 150分
-    const secondsInBlock = (minutesInBlock * 60) % 300; // 5分 = 300秒
-    const filledSquares = Math.floor(secondsInBlock / 30); // 30秒 = 1個の四角
+    const levelInBlock = ((userLevel - 1) % 5) + 1;
+    const minutesInBlock = totalMinutes % 150;
+    const secondsInBlock = (minutesInBlock * 60) % 300;
+    const filledSquares = Math.floor(secondsInBlock / 30);
     const emptySquares = 10 - filledSquares;
     const levelBar = '█'.repeat(filledSquares) + '░'.repeat(emptySquares);
 
-    // 次のレベルに必要な総時間を計算（5分 = 1レベル）
-    const nextLevelRequiredMinutes = (userLevel) * 5;
-    const remainingMinutesForNextLevel = Math.max(0, nextLevelRequiredMinutes - totalMinutes);
+    // 次のレベルに必要な総時間を計算
+    function getMinutesForNextLevel(currentLevel, currentMinutes) {
+      if (currentLevel >= 250) return 0;
+
+      let targetMinutes = 0;
+
+      // 次のレベルに必要な累積時間を計算
+      if (currentLevel < 150) {
+        targetMinutes = (currentLevel + 1 - 1) * 5;
+      } else if (currentLevel < 160) {
+        targetMinutes = 745 + (currentLevel + 1 - 150) * 6;
+      } else if (currentLevel < 170) {
+        targetMinutes = 805 + (currentLevel + 1 - 160) * 7;
+      } else if (currentLevel < 180) {
+        targetMinutes = 875 + (currentLevel + 1 - 170) * 9;
+      } else if (currentLevel < 200) {
+        targetMinutes = 965 + (currentLevel + 1 - 180) * 10;
+      } else if (currentLevel < 210) {
+        targetMinutes = 1165 + (currentLevel + 1 - 200) * 15;
+      } else if (currentLevel < 220) {
+        targetMinutes = 1315 + (currentLevel + 1 - 210) * 20;
+      } else if (currentLevel < 250) {
+        targetMinutes = 1515 + (currentLevel + 1 - 220) * 30;
+      }
+
+      return Math.max(0, targetMinutes - currentMinutes);
+    }
+
+    const remainingMinutesForNextLevel = getMinutesForNextLevel(userLevel, totalMinutes);
+
+    // ティアを取得
+    const currentTier = getTierByLevel(userLevel);
+
+    // 週間グラフを作成
+    const dayNames = ['月', '火', '水', '木', '金', '土', '日'];
+    const maxMinutes = Math.max(...weeklyGraph.map(d => d.minutes), 1);
+    const weeklyGraphText = weeklyGraph.map((data, index) => {
+      const barLength = Math.round((data.minutes / maxMinutes) * 10);
+      const bar = '█'.repeat(barLength) + '░'.repeat(10 - barLength);
+      return `${dayNames[index]}: ${bar} ${data.minutes}m`;
+    }).join('\n');
+
+    // 先週比を計算
+    let weekComparisonText = 'データなし';
+    if (lastWeekTotal > 0) {
+      const diff = weekTotal - lastWeekTotal;
+      const percentage = Math.round((diff / lastWeekTotal) * 100);
+      if (percentage > 0) {
+        weekComparisonText = `⬆ ${Math.abs(percentage)}%`;
+      } else if (percentage < 0) {
+        weekComparisonText = `⬇ ${Math.abs(percentage)}%`;
+      } else {
+        weekComparisonText = `➖ 0%`;
+      }
+    } else if (weekTotal > 0) {
+      weekComparisonText = `⬆ 100%`;
+    }
 
     console.log(`✅ Stats取得完了: today=${todayTotal}, week=${weekTotal}, month=${monthTotal}, level=${userLevel}, totalMinutes=${totalMinutes}`);
 
@@ -1283,13 +1347,33 @@ async function showStats(interaction) {
       .addFields(
         {
           name: '🎮 現在のレベル',
-          value: `**Level ${userLevel}** / 250\n${levelBar}`,
+          value: `Level ${userLevel} / 250\n${levelBar}`,
+          inline: false
+        },
+        {
+          name: '🏆 現在のティア',
+          value: currentTier,
+          inline: false
+        },
+        {
+          name: '📅 今週の学習グラフ',
+          value: '```\n' + weeklyGraphText + '\n```',
           inline: false
         },
         {
           name: '📈 学習時間',
-          value: `**今日**: ${formatMinutes(todayTotal)}\n**今週**: ${formatMinutes(weekTotal)}\n**今月**: ${formatMinutes(monthTotal)}`,
+          value: `**今日**: ${todayTotal}分\n**今週**: ${weekTotal}分\n**今月**: ${monthTotal}分（約${Math.floor(monthTotal / 60)}時間${monthTotal % 60}分）`,
           inline: false
+        },
+        {
+          name: '⚡ 今日の最高集中力',
+          value: maxFocusMinutes > 0 ? `${maxFocusMinutes}分` : 'データなし',
+          inline: true
+        },
+        {
+          name: '📊 先週比',
+          value: weekComparisonText,
+          inline: true
         },
         {
           name: '💡 次のレベルまで',
@@ -1298,7 +1382,7 @@ async function showStats(interaction) {
         },
         {
           name: '⏰ ペース',
-          value: weekTotal > 0 ? `週間平均: ${Math.round(weekTotal / 7)}分/日` : 'データなし',
+          value: weekTotal > 0 ? `${Math.round(weekTotal / 7)}分/日` : 'データなし',
           inline: true
         }
       )
@@ -2303,9 +2387,111 @@ function splitMessage(text, maxLength = 1900) {
 // Cosmetic Items Database
 
 async function calculateLevel(totalMinutes) {
-  // 5分 = 1レベル、最小1レベル、最大250レベル
-  const level = Math.min(250, Math.max(1, 1 + Math.floor(totalMinutes / 5)));
-  return level;
+  // 新しいレベル計算システム
+  // Level 1-150: 5分/レベル
+  // Level 150-160: 6分/レベル
+  // Level 160-170: 7分/レベル
+  // Level 170-180: 9分/レベル
+  // Level 180-200: 10分/レベル
+  // Level 200-210: 15分/レベル
+  // Level 210-220: 20分/レベル
+  // Level 220-250: 30分/レベル
+
+  if (totalMinutes < 5) return 1;
+
+  // Level 1-150: 5分/レベル (累積: 0-745分)
+  if (totalMinutes < 745) {
+    return Math.min(150, 1 + Math.floor(totalMinutes / 5));
+  }
+
+  // Level 150-160: 6分/レベル (累積: 745-805分)
+  if (totalMinutes < 805) {
+    return 150 + Math.floor((totalMinutes - 745) / 6);
+  }
+
+  // Level 160-170: 7分/レベル (累積: 805-875分)
+  if (totalMinutes < 875) {
+    return 160 + Math.floor((totalMinutes - 805) / 7);
+  }
+
+  // Level 170-180: 9分/レベル (累積: 875-965分)
+  if (totalMinutes < 965) {
+    return 170 + Math.floor((totalMinutes - 875) / 9);
+  }
+
+  // Level 180-200: 10分/レベル (累積: 965-1165分)
+  if (totalMinutes < 1165) {
+    return 180 + Math.floor((totalMinutes - 965) / 10);
+  }
+
+  // Level 200-210: 15分/レベル (累積: 1165-1315分)
+  if (totalMinutes < 1315) {
+    return 200 + Math.floor((totalMinutes - 1165) / 15);
+  }
+
+  // Level 210-220: 20分/レベル (累積: 1315-1515分)
+  if (totalMinutes < 1515) {
+    return 210 + Math.floor((totalMinutes - 1315) / 20);
+  }
+
+  // Level 220-250: 30分/レベル (累積: 1515-2415分)
+  if (totalMinutes < 2415) {
+    return 220 + Math.floor((totalMinutes - 1515) / 30);
+  }
+
+  return 250; // 最大レベル
+}
+
+function getTierByLevel(level) {
+  // Bronze 5-1: Level 1-50
+  if (level >= 1 && level <= 10) return 'Bronze 5';
+  if (level >= 11 && level <= 20) return 'Bronze 4';
+  if (level >= 21 && level <= 30) return 'Bronze 3';
+  if (level >= 31 && level <= 40) return 'Bronze 2';
+  if (level >= 41 && level <= 50) return 'Bronze 1';
+
+  // Silver 5-1: Level 51-100
+  if (level >= 51 && level <= 60) return 'Silver 5';
+  if (level >= 61 && level <= 70) return 'Silver 4';
+  if (level >= 71 && level <= 80) return 'Silver 3';
+  if (level >= 81 && level <= 90) return 'Silver 2';
+  if (level >= 91 && level <= 100) return 'Silver 1';
+
+  // Gold 5-1: Level 101-150
+  if (level >= 101 && level <= 110) return 'Gold 5';
+  if (level >= 111 && level <= 120) return 'Gold 4';
+  if (level >= 121 && level <= 130) return 'Gold 3';
+  if (level >= 131 && level <= 140) return 'Gold 2';
+  if (level >= 141 && level <= 150) return 'Gold 1';
+
+  // Platinum 5-1: Level 151-200
+  if (level >= 151 && level <= 160) return 'Platinum 5';
+  if (level >= 161 && level <= 170) return 'Platinum 4';
+  if (level >= 171 && level <= 180) return 'Platinum 3';
+  if (level >= 181 && level <= 190) return 'Platinum 2';
+  if (level >= 191 && level <= 200) return 'Platinum 1';
+
+  // Diamond 5-1: Level 201-225
+  if (level >= 201 && level <= 205) return 'Diamond 5';
+  if (level >= 206 && level <= 210) return 'Diamond 4';
+  if (level >= 211 && level <= 215) return 'Diamond 3';
+  if (level >= 216 && level <= 220) return 'Diamond 2';
+  if (level >= 221 && level <= 225) return 'Diamond 1';
+
+  // Master 5-1: Level 226-238
+  if (level >= 226 && level <= 228) return 'Master 5';
+  if (level >= 229 && level <= 231) return 'Master 4';
+  if (level >= 232 && level <= 234) return 'Master 3';
+  if (level >= 235 && level <= 237) return 'Master 2';
+  if (level >= 238) return 'Master 1';
+
+  // Champion: Level 239-244
+  if (level >= 239 && level <= 244) return 'Champion';
+
+  // Challenger: Level 245-250
+  if (level >= 245) return 'Challenger';
+
+  return 'Bronze 5';
 }
 
 async function updateUserLevel(userId) {
