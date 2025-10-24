@@ -1081,13 +1081,30 @@ async function showRank(interaction) {
   try {
     console.log(`📊 Rank取得開始`);
 
-    // 全ユーザーのレベル情報を取得
-    const { data: users, error } = await supabase
-      .from('discord_users')
-      .select('user_id, username, display_name, level')
-      .order('level', { ascending: false });
+    // 今週の範囲を計算
+    const nowDate = now();
+    const weekStart = nowDate.startOf('isoWeek');
+    const weekEnd = weekStart.add(6, 'day');
+    const weekStartKey = getDateKey(weekStart);
+    const weekEndKey = getDateKey(weekEnd);
 
-    if (error) throw error;
+    // 全ユーザーのレベル情報と今週の学習時間を並列取得
+    const [
+      { data: users, error: usersError },
+      { data: weeklyData, error: weeklyError }
+    ] = await Promise.all([
+      supabase
+        .from('discord_users')
+        .select('user_id, username, display_name, level')
+        .order('level', { ascending: false }),
+      supabase
+        .from('study_records')
+        .select('user_id, total_minutes')
+        .gte('date', weekStartKey)
+        .lte('date', weekEndKey)
+    ]);
+
+    if (usersError) throw usersError;
 
     if (!users || users.length === 0) {
       const emptyEmbed = buildInfoEmbed('レベルランキング', 'まだユーザー記録がありません。`/startstudy`で勉強を始めましょう！');
@@ -1095,8 +1112,23 @@ async function showRank(interaction) {
       return;
     }
 
+    // ユーザーごとの週間学習時間を集計
+    const weeklyMinutesByUser = {};
+    if (weeklyData && !weeklyError) {
+      weeklyData.forEach(record => {
+        if (!weeklyMinutesByUser[record.user_id]) {
+          weeklyMinutesByUser[record.user_id] = 0;
+        }
+        weeklyMinutesByUser[record.user_id] += record.total_minutes;
+      });
+    }
+
     const rankingLines = users.map((user, index) => {
-      const tier = getTierByLevel(user.level);
+      const levelBasedTier = getTierByLevel(user.level);
+      const weeklyMinutes = weeklyMinutesByUser[user.user_id] || 0;
+      const weeklyBasedTier = getTierByWeeklyMinutes(weeklyMinutes);
+      const tier = getHigherTier(levelBasedTier, weeklyBasedTier);
+
       const displayName = user.display_name || user.username || `User ${user.user_id}`;
       const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `${index + 1}.`;
       return `${medal} **${tier}** (Lv.${user.level}) - ${displayName}`;
@@ -1311,7 +1343,12 @@ async function showStats(interaction) {
     const remainingMinutesForNextLevel = getMinutesForNextLevel(userLevel, totalMinutes);
 
     // ティアを取得
-    const currentTier = getTierByLevel(userLevel);
+    const levelBasedTier = getTierByLevel(userLevel);  // 累積時間ベースのティア
+    const weeklyBasedTier = getTierByWeeklyMinutes(weekTotal);  // 週間時間ベースのティア
+    const currentTier = getHigherTier(levelBasedTier, weeklyBasedTier);  // より高いティア
+
+    // ティア色を優先的に適用（カスタマイズ色より優先）
+    embedColor = getTierColor(currentTier);
 
     // 週間グラフを作成
     const dayNames = ['月', '火', '水', '木', '金', '土', '日'];
@@ -1352,7 +1389,7 @@ async function showStats(interaction) {
         },
         {
           name: '🏆 現在のティア',
-          value: currentTier,
+          value: `**${currentTier}**\n⭕️ 累積: ${levelBasedTier}\n⭕️ 週間: ${weeklyBasedTier}`,
           inline: false
         },
         {
@@ -1362,7 +1399,7 @@ async function showStats(interaction) {
         },
         {
           name: '📈 学習時間',
-          value: `**今日**: ${todayTotal}分\n**今週**: ${weekTotal}分\n**今月**: ${monthTotal}分（約${Math.floor(monthTotal / 60)}時間${monthTotal % 60}分）`,
+          value: `**今日**: ${todayTotal}分（約${Math.floor(todayTotal / 60)}時間${todayTotal % 60}分）\n**今週**: ${weekTotal}分（約${Math.floor(weekTotal / 60)}時間${weekTotal % 60}分）\n**今月**: ${monthTotal}分（約${Math.floor(monthTotal / 60)}時間${monthTotal % 60}分）`,
           inline: false
         },
         {
@@ -2114,7 +2151,7 @@ async function handleHelpButton(interaction, customId) {
         description = `\`/pomodoro\` - 25分集中タイマー開始\n\`/pomodorostop\` - タイマー停止`;
         break;
       case 'help_tier':
-        description = `🌱 ノービス (5時間未満)\n🥉 ブロンズ (5時間以上)\n🥈 シルバー (10時間以上)\n🏆 ゴールド (20時間以上)\n🤍 プラチナ (30時間以上)\n💎 ダイヤモンド (40時間以上)\n👑 グランドマスター (60時間以上)\n🔥 チャレンジャー (70時間以上)`;
+        description = `**📚 累積時間ティア（レベル基準）**\n🥉 Bronze (Lv.1-50)\n🥈 Silver (Lv.51-100)\n🏆 Gold (Lv.101-150)\n💎 Platinum (Lv.151-200)\n💠 Diamond (Lv.201-225)\n👑 Master (Lv.226-238)\n🏅 Champion (Lv.239-244)\n🔥 Challenger (Lv.245-250)\n\n**📅 週間学習ティア**\n🥉 Bronze (1時間未満)\n🥈 Silver (1時間以上)\n🏆 Gold (2時間以上)\n💎 Platinum (4時間以上)\n💠 Diamond (8時間以上)\n👑 Master (12時間以上)\n⭐ Grand Master (16時間以上)\n🔥 Challenger (20時間以上)\n\n*累積と週間で高い方のティアが表示されます*`;
         break;
     }
 
@@ -2492,6 +2529,86 @@ function getTierByLevel(level) {
   if (level >= 245) return 'Challenger';
 
   return 'Bronze 5';
+}
+
+// 주간 공부 시간(분)을 기반으로 티어 반환
+function getTierByWeeklyMinutes(weeklyMinutes) {
+  if (weeklyMinutes >= 1200) return 'Challenger';      // 20시간 이상
+  if (weeklyMinutes >= 960) return 'Grand Master';     // 16시간 이상
+  if (weeklyMinutes >= 720) return 'Master';           // 12시간 이상
+  if (weeklyMinutes >= 480) return 'Diamond';          // 8시간 이상
+  if (weeklyMinutes >= 240) return 'Platinum';         // 4시간 이상
+  if (weeklyMinutes >= 120) return 'Gold';             // 2시간 이상
+  if (weeklyMinutes >= 60) return 'Silver';            // 1시간 이상
+  return 'Bronze';                                     // 1시간 미만
+}
+
+// 티어 우선순위를 숫자로 반환 (높을수록 상위 티어)
+function getTierRank(tier) {
+  const tierRanks = {
+    'Challenger': 100,
+    'Champion': 95,
+    'Grand Master': 90,
+    'Master 1': 85,
+    'Master 2': 84,
+    'Master 3': 83,
+    'Master 4': 82,
+    'Master 5': 81,
+    'Master': 85,  // 주간 티어용
+    'Diamond 1': 75,
+    'Diamond 2': 74,
+    'Diamond 3': 73,
+    'Diamond 4': 72,
+    'Diamond 5': 71,
+    'Diamond': 75,  // 주간 티어용
+    'Platinum 1': 65,
+    'Platinum 2': 64,
+    'Platinum 3': 63,
+    'Platinum 4': 62,
+    'Platinum 5': 61,
+    'Platinum': 65,  // 주간 티어용
+    'Gold 1': 55,
+    'Gold 2': 54,
+    'Gold 3': 53,
+    'Gold 4': 52,
+    'Gold 5': 51,
+    'Gold': 55,  // 주간 티어용
+    'Silver 1': 45,
+    'Silver 2': 44,
+    'Silver 3': 43,
+    'Silver 4': 42,
+    'Silver 5': 41,
+    'Silver': 45,  // 주간 티어용
+    'Bronze 1': 35,
+    'Bronze 2': 34,
+    'Bronze 3': 33,
+    'Bronze 4': 32,
+    'Bronze 5': 31,
+    'Bronze': 35  // 주간 티어용
+  };
+
+  return tierRanks[tier] || 0;
+}
+
+// 두 티어 중 더 높은 티어 반환
+function getHigherTier(tier1, tier2) {
+  const rank1 = getTierRank(tier1);
+  const rank2 = getTierRank(tier2);
+  return rank1 >= rank2 ? tier1 : tier2;
+}
+
+// 티어별 색상 반환 (16진수)
+function getTierColor(tier) {
+  if (tier.includes('Challenger')) return 0xFF0000;  // 빨강
+  if (tier.includes('Champion')) return 0xFF00FF;    // 마젠타
+  if (tier.includes('Grand Master')) return 0xFFD700; // 골드
+  if (tier.includes('Master')) return 0x9370DB;      // 보라
+  if (tier.includes('Diamond')) return 0x00FFFF;     // 청록
+  if (tier.includes('Platinum')) return 0x00FF00;    // 초록
+  if (tier.includes('Gold')) return 0xFFFF00;        // 노랑
+  if (tier.includes('Silver')) return 0xC0C0C0;      // 은색
+  if (tier.includes('Bronze')) return 0xCD7F32;      // 청동
+  return 0x7289DA;  // 기본 (Discord 블루)
 }
 
 async function updateUserLevel(userId) {
