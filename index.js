@@ -7,6 +7,7 @@ const utc = require('dayjs/plugin/utc');
 const timezone = require('dayjs/plugin/timezone');
 const isoWeek = require('dayjs/plugin/isoWeek');
 const http = require('http');
+const { handleTodayCommand } = require('./commands/today');
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -187,6 +188,10 @@ const slashCommands = [
         .setDescription('装備したいアイテムのID')
         .setRequired(true)
     )
+    .setDMPermission(false),
+  new SlashCommandBuilder()
+    .setName('today')
+    .setDescription('今日の学習サマリー画像を生成します')
     .setDMPermission(false),
 ].map((command) => command.toJSON());
 
@@ -644,6 +649,9 @@ client.on('interactionCreate', async (interaction) => {
         break;
       case 'equip':
         await equipItem(interaction);
+        break;
+      case 'today':
+        await handleTodayCommand(interaction, supabase);
         break;
       default:
         break;
@@ -1707,7 +1715,10 @@ async function completeTodo(interaction) {
 
     const { error: updateError } = await supabase
       .from('todos')
-      .update({ completed: true })
+      .update({
+        completed: true,
+        completed_at: new Date().toISOString()
+      })
       .eq('id', targetTodo.id);
     
     if (updateError) throw updateError;
@@ -2151,7 +2162,7 @@ async function handleHelpButton(interaction, customId) {
         description = `\`/pomodoro\` - 25分集中タイマー開始\n\`/pomodorostop\` - タイマー停止`;
         break;
       case 'help_tier':
-        description = `**📚 累積時間ティア（レベル基準）**\n🥉 Bronze (Lv.1-50)\n🥈 Silver (Lv.51-100)\n🏆 Gold (Lv.101-150)\n💎 Platinum (Lv.151-200)\n💠 Diamond (Lv.201-225)\n👑 Master (Lv.226-238)\n🏅 Champion (Lv.239-244)\n🔥 Challenger (Lv.245-250)\n\n**📅 週間学習ティア**\n🥉 Bronze (1時間未満)\n🥈 Silver (1時間以上)\n🏆 Gold (2時間以上)\n💎 Platinum (4時間以上)\n💠 Diamond (8時間以上)\n👑 Master (12時間以上)\n⭐ Grand Master (16時間以上)\n🔥 Challenger (20時間以上)\n\n*累積と週間で高い方のティアが表示されます*`;
+        description = `**📚 累積時間ティア（レベル基準）**\n🥉 Bronze 5-1 (Lv.1-50)\n🥈 Silver 5-1 (Lv.51-100)\n🏆 Gold 5-1 (Lv.101-150)\n💎 Platinum 5-1 (Lv.151-200)\n💠 Diamond 5-1 (Lv.201-225)\n👑 Master 5-1 (Lv.226-238)\n🏅 Champion (Lv.239-244)\n🔥 Challenger (Lv.245-250)\n\n**📅 週間学習ティア（各5段階）**\n🥉 Bronze 5-1 (0-1時間)\n🥈 Silver 5-1 (1-2時間)\n🏆 Gold 5-1 (2-4時間)\n💎 Platinum 5-1 (4-8時間)\n💠 Diamond 5-1 (8-12時間)\n👑 Master 5-1 (12-16時間)\n⭐ Grand Master 5-1 (16-20時間)\n🔥 Challenger (20時間以上)\n\n*累積と週間で高い方のティアが表示されます*`;
         break;
     }
 
@@ -2533,58 +2544,99 @@ function getTierByLevel(level) {
 
 // 주간 공부 시간(분)을 기반으로 티어 반환
 function getTierByWeeklyMinutes(weeklyMinutes) {
-  if (weeklyMinutes >= 1200) return 'Challenger';      // 20시간 이상
-  if (weeklyMinutes >= 960) return 'Grand Master';     // 16시간 이상
-  if (weeklyMinutes >= 720) return 'Master';           // 12시간 이상
-  if (weeklyMinutes >= 480) return 'Diamond';          // 8시간 이상
-  if (weeklyMinutes >= 240) return 'Platinum';         // 4시간 이상
-  if (weeklyMinutes >= 120) return 'Gold';             // 2시간 이상
-  if (weeklyMinutes >= 60) return 'Silver';            // 1시간 이상
-  return 'Bronze';                                     // 1시간 미만
+  // Challenger: 20시간 이상
+  if (weeklyMinutes >= 1200) return 'Challenger';
+
+  // Grand Master 5-1: 16-20시간
+  if (weeklyMinutes >= 1152) return 'Grand Master 1';
+  if (weeklyMinutes >= 1104) return 'Grand Master 2';
+  if (weeklyMinutes >= 1056) return 'Grand Master 3';
+  if (weeklyMinutes >= 1008) return 'Grand Master 4';
+  if (weeklyMinutes >= 960) return 'Grand Master 5';
+
+  // Master 5-1: 12-16시간
+  if (weeklyMinutes >= 912) return 'Master 1';
+  if (weeklyMinutes >= 864) return 'Master 2';
+  if (weeklyMinutes >= 816) return 'Master 3';
+  if (weeklyMinutes >= 768) return 'Master 4';
+  if (weeklyMinutes >= 720) return 'Master 5';
+
+  // Diamond 5-1: 8-12시간
+  if (weeklyMinutes >= 672) return 'Diamond 1';
+  if (weeklyMinutes >= 624) return 'Diamond 2';
+  if (weeklyMinutes >= 576) return 'Diamond 3';
+  if (weeklyMinutes >= 528) return 'Diamond 4';
+  if (weeklyMinutes >= 480) return 'Diamond 5';
+
+  // Platinum 5-1: 4-8시간
+  if (weeklyMinutes >= 432) return 'Platinum 1';
+  if (weeklyMinutes >= 384) return 'Platinum 2';
+  if (weeklyMinutes >= 336) return 'Platinum 3';
+  if (weeklyMinutes >= 288) return 'Platinum 4';
+  if (weeklyMinutes >= 240) return 'Platinum 5';
+
+  // Gold 5-1: 2-4시간
+  if (weeklyMinutes >= 216) return 'Gold 1';
+  if (weeklyMinutes >= 192) return 'Gold 2';
+  if (weeklyMinutes >= 168) return 'Gold 3';
+  if (weeklyMinutes >= 144) return 'Gold 4';
+  if (weeklyMinutes >= 120) return 'Gold 5';
+
+  // Silver 5-1: 1-2시간
+  if (weeklyMinutes >= 108) return 'Silver 1';
+  if (weeklyMinutes >= 96) return 'Silver 2';
+  if (weeklyMinutes >= 84) return 'Silver 3';
+  if (weeklyMinutes >= 72) return 'Silver 4';
+  if (weeklyMinutes >= 60) return 'Silver 5';
+
+  // Bronze 5-1: 0-1시간
+  if (weeklyMinutes >= 48) return 'Bronze 1';
+  if (weeklyMinutes >= 36) return 'Bronze 2';
+  if (weeklyMinutes >= 24) return 'Bronze 3';
+  if (weeklyMinutes >= 12) return 'Bronze 4';
+  return 'Bronze 5';
 }
 
 // 티어 우선순위를 숫자로 반환 (높을수록 상위 티어)
 function getTierRank(tier) {
   const tierRanks = {
     'Challenger': 100,
-    'Champion': 95,
-    'Grand Master': 90,
+    'Grand Master 1': 99,
+    'Grand Master 2': 98,
+    'Grand Master 3': 97,
+    'Grand Master 4': 96,
+    'Grand Master 5': 95,
+    'Champion': 90,
     'Master 1': 85,
     'Master 2': 84,
     'Master 3': 83,
     'Master 4': 82,
     'Master 5': 81,
-    'Master': 85,  // 주간 티어용
     'Diamond 1': 75,
     'Diamond 2': 74,
     'Diamond 3': 73,
     'Diamond 4': 72,
     'Diamond 5': 71,
-    'Diamond': 75,  // 주간 티어용
     'Platinum 1': 65,
     'Platinum 2': 64,
     'Platinum 3': 63,
     'Platinum 4': 62,
     'Platinum 5': 61,
-    'Platinum': 65,  // 주간 티어용
     'Gold 1': 55,
     'Gold 2': 54,
     'Gold 3': 53,
     'Gold 4': 52,
     'Gold 5': 51,
-    'Gold': 55,  // 주간 티어용
     'Silver 1': 45,
     'Silver 2': 44,
     'Silver 3': 43,
     'Silver 4': 42,
     'Silver 5': 41,
-    'Silver': 45,  // 주간 티어용
     'Bronze 1': 35,
     'Bronze 2': 34,
     'Bronze 3': 33,
     'Bronze 4': 32,
-    'Bronze 5': 31,
-    'Bronze': 35  // 주간 티어용
+    'Bronze 5': 31
   };
 
   return tierRanks[tier] || 0;

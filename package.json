@@ -10,7 +10,9 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@fontsource/noto-sans-jp": "^5.2.8",
     "@supabase/supabase-js": "^2.75.1",
+    "canvas": "^3.2.0",
     "dayjs": "^1.11.11",
     "discord.js": "^14.23.2",
     "dotenv": "^16.4.5",
