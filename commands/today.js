@@ -89,7 +89,8 @@ async function handleTodayCommand(interaction, supabase) {
       completedTasks: taskList,
       tier: tier,
       level: userLevel,
-      studySessions: studySessions
+      studySessions: studySessions,
+      currentTime: nowDate
     });
 
     // Discord에 전송

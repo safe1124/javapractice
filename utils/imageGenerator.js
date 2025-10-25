@@ -1,5 +1,13 @@
 const { createCanvas, loadImage, registerFont } = require('canvas');
 const path = require('path');
+const dayjs = require('dayjs');
+const timezone = require('dayjs/plugin/timezone');
+const utc = require('dayjs/plugin/utc');
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
+
+const TIMEZONE = 'Asia/Tokyo';
 
 // ① 일본어 폰트 등록 (Google Fonts → Noto Sans JP)
 registerFont(path.join(__dirname, '../assets/fonts/NotoSansJP-Bold.ttf'), {
@@ -137,7 +145,7 @@ async function generateTodayImage(data) {
   y += 70;
 
   const timelineHeight = 600;
-  drawTimeline(ctx, data.studySessions || [], 200, y, 900, timelineHeight, color);
+  drawTimeline(ctx, data.studySessions || [], 200, y, 900, timelineHeight, color, data.currentTime);
 
   // 하단 문구
   y += timelineHeight + 80;
@@ -160,11 +168,18 @@ function drawLine(ctx, x1, y, x2, color, width) {
 }
 
 /** 10분 단위 타임테이블 */
-function drawTimeline(ctx, studySessions, x, y, width, height, color) {
+function drawTimeline(ctx, studySessions, x, y, width, height, color, currentTime) {
   const hourRows = 24;
   const colPerHour = 6; // 10분 단위
   const rowHeight = height / hourRows;
   const colWidth = (width - 100) / colPerHour;
+
+  // 현재 시간을 분으로 변환 (06:00 기준)
+  let currentMin = null;
+  if (currentTime) {
+    const current = dayjs(currentTime).tz(TIMEZONE);
+    currentMin = ((current.hour() < 6 ? current.hour() + 24 : current.hour()) * 60 + current.minute()) - 360;
+  }
 
   // 시간 행
   for (let i = 0; i < hourRows; i++) {
@@ -195,14 +210,22 @@ function drawTimeline(ctx, studySessions, x, y, width, height, color) {
 
   // 공부 세션 색칠
   studySessions.forEach(session => {
-    const start = new Date(session.start_time);
-    const end = new Date(session.end_time);
+    const start = dayjs(session.start_time).tz(TIMEZONE);
+    const end = dayjs(session.end_time).tz(TIMEZONE);
     const startMin =
-      ((start.getHours() < 6 ? start.getHours() + 24 : start.getHours()) * 60 + start.getMinutes()) -
+      ((start.hour() < 6 ? start.hour() + 24 : start.hour()) * 60 + start.minute()) -
       360;
-    const endMin =
-      ((end.getHours() < 6 ? end.getHours() + 24 : end.getHours()) * 60 + end.getMinutes()) -
+    let endMin =
+      ((end.hour() < 6 ? end.hour() + 24 : end.hour()) * 60 + end.minute()) -
       360;
+
+    // 현재 시간 이후는 그리지 않음
+    if (currentMin !== null && startMin > currentMin) {
+      return;  // 세션 시작이 현재 시간보다 미래면 건너뜀
+    }
+    if (currentMin !== null && endMin > currentMin) {
+      endMin = currentMin;  // 세션 종료가 현재 시간보다 미래면 현재 시간까지만 그림
+    }
 
     const startIndex = Math.floor(startMin / 10);
     const endIndex = Math.ceil(endMin / 10);

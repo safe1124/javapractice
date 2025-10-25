@@ -757,7 +757,7 @@ function calculateSessionMinutes(startIso, endIso) {
 // ==================== Supabase データベース関数 ====================
 
 async function addMoney(userId, amount) {
-  const nowIso = now().toISOString();
+  const nowIso = new Date().toISOString();
   
   try {
     // 既存のレコードを確認
@@ -802,7 +802,7 @@ async function addMoney(userId, amount) {
 }
 
 async function updateUserTotalStudyTime(userId, minutes) {
-  const nowIso = now().toISOString();
+  const nowIso = new Date().toISOString();
   
   try {
     // 既存のレコードを確認
@@ -847,7 +847,7 @@ async function updateUserTotalStudyTime(userId, minutes) {
 }
 
 async function saveDiscordUser(userId, username, displayName, avatarUrl) {
-  const nowIso = now().toISOString();
+  const nowIso = new Date().toISOString();
   
   try {
     // displayNameが空の場合はusernameを使用
@@ -903,7 +903,7 @@ async function saveDiscordUser(userId, username, displayName, avatarUrl) {
 async function startStudy(interaction) {
   const userId = interaction.user.id;
   const nowDate = now();
-  const nowIso = nowDate.toISOString();
+  const nowIso = new Date().toISOString();  // UTC 시간으로 저장
   const state = activeSessions.get(userId);
 
   try {
@@ -956,7 +956,7 @@ async function startStudy(interaction) {
 async function pauseStudy(interaction) {
   const userId = interaction.user.id;
   const nowDate = now();
-  const nowIso = nowDate.toISOString();
+  const nowIso = new Date().toISOString();  // UTC 시간으로 저장
   const state = activeSessions.get(userId);
 
   try {
@@ -1000,7 +1000,7 @@ async function pauseStudy(interaction) {
 async function stopStudy(interaction) {
   const userId = interaction.user.id;
   const nowDate = now();
-  const nowIso = nowDate.toISOString();
+  const nowIso = new Date().toISOString();  // UTC 시간으로 저장
   const state = activeSessions.get(userId);
 
   try {
@@ -1542,7 +1542,7 @@ async function addTodo(interaction) {
 
   const userId = interaction.user.id;
   const content = interaction.options.getString('content', true).trim();
-  const nowIso = now().toISOString();
+  const nowIso = new Date().toISOString();
 
   try {
     if (!content) {
