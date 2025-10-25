@@ -96,7 +96,7 @@ async function handleTodayCommand(interaction, supabase) {
     const attachment = new AttachmentBuilder(imageBuffer, { name: 'today-summary.png' });
 
     await interaction.editReply({
-      content: '📊 오늘의 학습 요약',
+      content: '📊 今日の学習要約',
       files: [attachment]
     });
 

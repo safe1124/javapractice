@@ -1585,17 +1585,11 @@ async function listTodo(interaction) {
   const userId = interaction.user.id;
 
   try {
-    // Defer immediately before any async operations
-    if (!interaction.replied && !interaction.deferred) {
-      await interaction.deferReply();
-    }
-    
     const { data: todos, error } = await supabase
       .from('todos')
       .select('*')
       .eq('user_id', userId)
-      .order('created_at', { ascending: true })
-      .limit(15);
+      .order('created_at', { ascending: true });
     
     if (error) throw error;
 
@@ -1612,7 +1606,7 @@ async function listTodo(interaction) {
     // Create embed with improved styling
     const listEmbed = new EmbedBuilder()
       .setColor(COLOR_PRIMARY)
-      .setTitle('✅ ToDoリスト (最大15件)')
+      .setTitle('✅ ToDoリスト')
       .setDescription('完了ボタンをクリックしてタスクを完了にしましょう!')
       .setTimestamp(new Date());
 
@@ -1683,17 +1677,12 @@ async function completeTodo(interaction) {
   const selectedNumber = interaction.options.getInteger('number', true);
 
   try {
-    if (!interaction.replied && !interaction.deferred) {
-      await interaction.deferReply();
-    }
-    
     const { data: todos, error: selectError } = await supabase
       .from('todos')
       .select('*')
       .eq('user_id', userId)
-      .order('created_at', { ascending: true })
-      .limit(15);
-    
+      .order('created_at', { ascending: true });
+
     if (selectError) throw selectError;
 
     if (!todos.length) {
@@ -1717,7 +1706,7 @@ async function completeTodo(interaction) {
       .from('todos')
       .update({
         completed: true,
-        completed_at: new Date().toISOString()
+        completed_at: now().toISOString()
       })
       .eq('id', targetTodo.id);
     
@@ -1736,17 +1725,12 @@ async function deleteTodo(interaction) {
   const selectedNumber = interaction.options.getInteger('number', true);
 
   try {
-    if (!interaction.replied && !interaction.deferred) {
-      await interaction.deferReply();
-    }
-    
     const { data: todos, error: selectError } = await supabase
       .from('todos')
       .select('*')
       .eq('user_id', userId)
-      .order('created_at', { ascending: true })
-      .limit(15);
-    
+      .order('created_at', { ascending: true });
+
     if (selectError) throw selectError;
 
     if (!todos.length) {
@@ -2211,7 +2195,10 @@ async function handleTodoCompleteButton(interaction, customId) {
     // Update todo to completed
     const { error: updateError } = await supabase
       .from('todos')
-      .update({ completed: true })
+      .update({
+        completed: true,
+        completed_at: now().toISOString()
+      })
       .eq('id', todoId);
     
     if (updateError) throw updateError;
