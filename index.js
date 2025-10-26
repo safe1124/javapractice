@@ -8,6 +8,7 @@ const timezone = require('dayjs/plugin/timezone');
 const isoWeek = require('dayjs/plugin/isoWeek');
 const http = require('http');
 const { handleTodayCommand } = require('./commands/today');
+const musicPlayer = require('./musicPlayer');
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -31,6 +32,40 @@ const activeSessions = new Map();
 const voiceSessions = new Map();
 const pomodoroSessions = new Map();
 const chatRateLimits = new Map(); // チャットボットAPI レート制限
+
+// 音楽サンプルのメタデータキャッシュ（遅延解消用）
+const SONG_METADATA_CACHE = {
+  'https://www.youtube.com/watch?v=Qc-XU75Bq_4': {
+    title: '最新ボカロメドレー 2024',
+    duration: 3600,
+    thumbnail: 'https://i.ytimg.com/vi/Qc-XU75Bq_4/maxresdefault.jpg'
+  },
+  'https://www.youtube.com/watch?v=TbakFPc4ZTw': {
+    title: '怪獣になりたい / flower',
+    duration: 198,
+    thumbnail: 'https://i.ytimg.com/vi/TbakFPc4ZTw/maxresdefault.jpg'
+  },
+  'https://www.youtube.com/watch?v=LmZD-TU96q4': {
+    title: 'iris out / DECO*27 feat. 初音ミク',
+    duration: 234,
+    thumbnail: 'https://i.ytimg.com/vi/LmZD-TU96q4/maxresdefault.jpg'
+  },
+  'https://www.youtube.com/watch?v=ViFHruS6oO8': {
+    title: 'お疲れsummer / flower',
+    duration: 213,
+    thumbnail: 'https://i.ytimg.com/vi/ViFHruS6oO8/maxresdefault.jpg'
+  },
+  'https://www.youtube.com/watch?v=vok6xmB1QEg': {
+    title: '集中力を高めるアルファ波BGM',
+    duration: 3600,
+    thumbnail: 'https://i.ytimg.com/vi/vok6xmB1QEg/maxresdefault.jpg'
+  },
+  'https://www.youtube.com/watch?v=5ss2qOtJf4U': {
+    title: 'ホワイトノイズ - 集中・リラックス用',
+    duration: 3600,
+    thumbnail: 'https://i.ytimg.com/vi/5ss2qOtJf4U/maxresdefault.jpg'
+  }
+};
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates] });
 
@@ -193,6 +228,56 @@ const slashCommands = [
     .setName('today')
     .setDescription('今日の学習サマリー画像を生成します')
     .setDMPermission(false),
+  new SlashCommandBuilder()
+    .setName('play')
+    .setDescription('音楽を再生します')
+    .addStringOption((option) =>
+      option
+        .setName('query')
+        .setDescription('YouTube URLまたは検索キーワード')
+        .setRequired(true)
+    )
+    .setDMPermission(false),
+  new SlashCommandBuilder()
+    .setName('skip')
+    .setDescription('現在の曲をスキップします')
+    .setDMPermission(false),
+  new SlashCommandBuilder()
+    .setName('pause')
+    .setDescription('再生を一時停止します')
+    .setDMPermission(false),
+  new SlashCommandBuilder()
+    .setName('resume')
+    .setDescription('再生を再開します')
+    .setDMPermission(false),
+  new SlashCommandBuilder()
+    .setName('stop')
+    .setDescription('音楽を停止して音声チャンネルから退出します')
+    .setDMPermission(false),
+  new SlashCommandBuilder()
+    .setName('queue')
+    .setDescription('現在の再生キューを表示します')
+    .setDMPermission(false),
+  new SlashCommandBuilder()
+    .setName('nowplaying')
+    .setDescription('現在再生中の曲を表示します')
+    .setDMPermission(false),
+  new SlashCommandBuilder()
+    .setName('volume')
+    .setDescription('音量を設定します')
+    .addIntegerOption((option) =>
+      option
+        .setName('level')
+        .setDescription('音量レベル (0-100)')
+        .setRequired(true)
+        .setMinValue(0)
+        .setMaxValue(100)
+    )
+    .setDMPermission(false),
+  new SlashCommandBuilder()
+    .setName('song')
+    .setDescription('人気の曲をボタンで簡単に再生します')
+    .setDMPermission(false),
 ].map((command) => command.toJSON());
 
 let commandsReady = false;
@@ -266,6 +351,11 @@ async function ensureColorRolesExist(guild) {
 
 client.once('clientReady', async () => {
   console.log(`ログイン完了：${client.user.tag}`);
+
+  // 音楽プレイヤーのメタデータキャッシュを設定
+  musicPlayer.setMetadataCache(SONG_METADATA_CACHE);
+  console.log('🎵 音楽メタデータキャッシュを設定しました');
+
   try {
     const guild = client.guilds.cache.get(GUILD_ID);
     if (guild) {
@@ -584,11 +674,13 @@ client.on('interactionCreate', async (interaction) => {
   if (interaction.isButton()) {
     try {
       const customId = interaction.customId;
-      
+
       if (customId.startsWith('help_')) {
         await handleHelpButton(interaction, customId);
       } else if (customId.startsWith('todo_complete_')) {
         await handleTodoCompleteButton(interaction, customId);
+      } else if (customId.startsWith('song_')) {
+        await handleSongButton(interaction, customId);
       }
     } catch (error) {
       console.error('❌ ボタンクリック処理エラー:', error);
@@ -699,6 +791,33 @@ client.on('interactionCreate', async (interaction) => {
         break;
       case 'today':
         await handleTodayCommand(interaction, supabase);
+        break;
+      case 'play':
+        await playMusic(interaction);
+        break;
+      case 'skip':
+        await skipMusic(interaction);
+        break;
+      case 'pause':
+        await pauseMusic(interaction);
+        break;
+      case 'resume':
+        await resumeMusic(interaction);
+        break;
+      case 'stop':
+        await stopMusic(interaction);
+        break;
+      case 'queue':
+        await showQueue(interaction);
+        break;
+      case 'nowplaying':
+        await showNowPlaying(interaction);
+        break;
+      case 'volume':
+        await setVolume(interaction);
+        break;
+      case 'song':
+        await showSongMenu(interaction);
         break;
       default:
         break;
@@ -3392,5 +3511,531 @@ async function equipItem(interaction) {
   } catch (error) {
     console.error('equipItemでエラーが発生しました', error);
     await sendEmbed(interaction, buildErrorEmbed('アイテムの装備に失敗しました。'));
+  }
+}
+
+// 音楽コマンド処理関数
+async function playMusic(interaction) {
+  try {
+    // 音声チャンネルにいるか確認
+    if (!interaction.member.voice.channel) {
+      return await interaction.reply({
+        content: '⚠️ 音声チャンネルに参加してから使用してください！',
+        ephemeral: true
+      });
+    }
+
+    await interaction.deferReply();
+
+    const query = interaction.options.getString('query');
+    const song = await musicPlayer.addSong(interaction, query);
+
+    if (!song) return;
+
+    const queue = musicPlayer.getQueueInfo(interaction.guildId);
+
+    if (queue.songs.length === 1) {
+      // 最初の曲なので再生開始
+      await musicPlayer.play(interaction);
+
+      const embed = new EmbedBuilder()
+        .setColor(COLOR_PRIMARY)
+        .setTitle('🎵 再生開始！')
+        .setDescription(`[${song.title}](${song.url})`)
+        .addFields(
+          { name: '⏱️ 長さ', value: formatDuration(song.duration), inline: true },
+          { name: '👤 リクエスト', value: song.requestedBy.username, inline: true }
+        )
+        .setTimestamp(new Date());
+
+      if (song.thumbnail && song.thumbnail.startsWith('http')) {
+        embed.setThumbnail(song.thumbnail);
+      }
+
+      await interaction.editReply({ embeds: [embed] });
+    } else {
+      // キューに追加
+      const embed = new EmbedBuilder()
+        .setColor(COLOR_SUCCESS)
+        .setTitle('➕ キューに追加！')
+        .setDescription(`[${song.title}](${song.url})`)
+        .addFields(
+          { name: '📝 キュー位置', value: `${queue.songs.length}番目`, inline: true },
+          { name: '⏱️ 長さ', value: formatDuration(song.duration), inline: true }
+        )
+        .setTimestamp(new Date());
+
+      if (song.thumbnail && song.thumbnail.startsWith('http')) {
+        embed.setThumbnail(song.thumbnail);
+      }
+
+      await interaction.editReply({ embeds: [embed] });
+    }
+  } catch (error) {
+    console.error('playMusicでエラーが発生しました', error);
+
+    if (interaction.deferred) {
+      await interaction.editReply({ content: '❌ 音楽の再生に失敗しました。URLが正しいか確認してください。' });
+    } else {
+      await interaction.reply({ content: '❌ 音楽の再生に失敗しました。', ephemeral: true });
+    }
+  }
+}
+
+async function skipMusic(interaction) {
+  try {
+    const queue = musicPlayer.getQueueInfo(interaction.guildId);
+
+    if (!queue.isPlaying) {
+      return await interaction.reply({
+        content: '⚠️ 現在再生中の曲はありません！',
+        ephemeral: true
+      });
+    }
+
+    musicPlayer.skip(interaction.guildId);
+
+    const embed = new EmbedBuilder()
+      .setColor(COLOR_PRIMARY)
+      .setTitle('⏭️ スキップしました')
+      .setDescription('次の曲を再生します')
+      .setTimestamp(new Date());
+
+    await interaction.reply({ embeds: [embed] });
+  } catch (error) {
+    console.error('skipMusicでエラーが発生しました', error);
+    await interaction.reply({ content: '❌ スキップに失敗しました。', ephemeral: true });
+  }
+}
+
+async function pauseMusic(interaction) {
+  try {
+    const success = musicPlayer.pause(interaction.guildId);
+
+    if (!success) {
+      return await interaction.reply({
+        content: '⚠️ 現在再生中の曲はありません！',
+        ephemeral: true
+      });
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor(COLOR_PRIMARY)
+      .setTitle('⏸️ 一時停止しました')
+      .setDescription('`/resume` で再開できます')
+      .setTimestamp(new Date());
+
+    await interaction.reply({ embeds: [embed] });
+  } catch (error) {
+    console.error('pauseMusicでエラーが発生しました', error);
+    await interaction.reply({ content: '❌ 一時停止に失敗しました。', ephemeral: true });
+  }
+}
+
+async function resumeMusic(interaction) {
+  try {
+    const success = musicPlayer.resume(interaction.guildId);
+
+    if (!success) {
+      return await interaction.reply({
+        content: '⚠️ 一時停止中の曲はありません！',
+        ephemeral: true
+      });
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor(COLOR_SUCCESS)
+      .setTitle('▶️ 再開しました')
+      .setDescription('音楽を再開します')
+      .setTimestamp(new Date());
+
+    await interaction.reply({ embeds: [embed] });
+  } catch (error) {
+    console.error('resumeMusicでエラーが発生しました', error);
+    await interaction.reply({ content: '❌ 再開に失敗しました。', ephemeral: true });
+  }
+}
+
+async function stopMusic(interaction) {
+  try {
+    const success = musicPlayer.stop(interaction.guildId);
+
+    if (!success) {
+      return await interaction.reply({
+        content: '⚠️ 現在再生中の曲はありません！',
+        ephemeral: true
+      });
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor(COLOR_DANGER)
+      .setTitle('⏹️ 停止しました')
+      .setDescription('音声チャンネルから退出しました')
+      .setTimestamp(new Date());
+
+    await interaction.reply({ embeds: [embed] });
+  } catch (error) {
+    console.error('stopMusicでエラーが発生しました', error);
+    await interaction.reply({ content: '❌ 停止に失敗しました。', ephemeral: true });
+  }
+}
+
+async function showQueue(interaction) {
+  try {
+    const queue = musicPlayer.getQueueInfo(interaction.guildId);
+
+    if (queue.songs.length === 0) {
+      return await interaction.reply({
+        content: '📝 キューは空です！`/play` で音楽を追加してください。',
+        ephemeral: true
+      });
+    }
+
+    const queueList = queue.songs
+      .slice(0, 10)
+      .map((song, index) => {
+        const status = index === 0 ? '🎵' : `${index}.`;
+        return `${status} [${song.title}](${song.url}) - \`${formatDuration(song.duration)}\``;
+      })
+      .join('\n');
+
+    const embed = new EmbedBuilder()
+      .setColor(COLOR_PRIMARY)
+      .setTitle('📝 再生キュー')
+      .setDescription(queueList)
+      .setFooter({ text: `全 ${queue.songs.length} 曲` })
+      .setTimestamp(new Date());
+
+    if (queue.songs.length > 10) {
+      embed.addFields({
+        name: '他の曲',
+        value: `...他 ${queue.songs.length - 10} 曲`
+      });
+    }
+
+    await interaction.reply({ embeds: [embed] });
+  } catch (error) {
+    console.error('showQueueでエラーが発生しました', error);
+    await interaction.reply({ content: '❌ キューの表示に失敗しました。', ephemeral: true });
+  }
+}
+
+async function showNowPlaying(interaction) {
+  try {
+    const queue = musicPlayer.getQueueInfo(interaction.guildId);
+
+    if (queue.songs.length === 0 || !queue.isPlaying) {
+      return await interaction.reply({
+        content: '⚠️ 現在再生中の曲はありません！',
+        ephemeral: true
+      });
+    }
+
+    const song = queue.songs[0];
+
+    const embed = new EmbedBuilder()
+      .setColor(COLOR_PRIMARY)
+      .setTitle('🎵 再生中')
+      .setDescription(`[${song.title}](${song.url})`)
+      .addFields(
+        { name: '⏱️ 長さ', value: formatDuration(song.duration), inline: true },
+        { name: '👤 リクエスト', value: song.requestedBy.username, inline: true },
+        { name: '🔊 音量', value: `${Math.round(queue.volume * 100)}%`, inline: true }
+      )
+      .setTimestamp(new Date());
+
+    if (song.thumbnail && song.thumbnail.startsWith('http')) {
+      embed.setThumbnail(song.thumbnail);
+    }
+
+    if (queue.songs.length > 1) {
+      embed.addFields({
+        name: '次の曲',
+        value: queue.songs[1].title
+      });
+    }
+
+    await interaction.reply({ embeds: [embed] });
+  } catch (error) {
+    console.error('showNowPlayingでエラーが発生しました', error);
+    await interaction.reply({ content: '❌ 現在の曲の表示に失敗しました。', ephemeral: true });
+  }
+}
+
+async function setVolume(interaction) {
+  try {
+    const queue = musicPlayer.getQueueInfo(interaction.guildId);
+
+    if (!queue.isPlaying) {
+      return await interaction.reply({
+        content: '⚠️ 現在再生中の曲はありません！',
+        ephemeral: true
+      });
+    }
+
+    const level = interaction.options.getInteger('level');
+    const volume = musicPlayer.setVolume(interaction.guildId, level / 100);
+
+    const embed = new EmbedBuilder()
+      .setColor(COLOR_SUCCESS)
+      .setTitle('🔊 音量を変更しました')
+      .setDescription(`音量: ${Math.round(volume * 100)}%`)
+      .setTimestamp(new Date());
+
+    await interaction.reply({ embeds: [embed] });
+  } catch (error) {
+    console.error('setVolumeでエラーが発生しました', error);
+    await interaction.reply({ content: '❌ 音量の変更に失敗しました。', ephemeral: true });
+  }
+}
+
+function formatDuration(seconds) {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  }
+  return `${minutes}:${String(secs).padStart(2, '0')}`;
+}
+
+// 曲メニュー表示
+async function showSongMenu(interaction) {
+  try {
+    const embed = new EmbedBuilder()
+      .setColor(COLOR_PRIMARY)
+      .setTitle('🎵 人気曲メニュー')
+      .setDescription('ボタンをクリックして曲を再生します！\n音声チャンネルに参加してからご利用ください。')
+      .addFields(
+        { name: '🎤 最新ボカロ', value: '最新のボーカロイド楽曲', inline: true },
+        { name: '🦖 怪獣になりたい', value: '人気ボカロ曲', inline: true },
+        { name: '🌸 iris out', value: '落ち着いたボカロ曲', inline: true },
+        { name: '☀️ お疲れsummer', value: '夏の癒し曲', inline: true },
+        { name: '🧘 集中アルファ波', value: '勉強・作業用BGM', inline: true },
+        { name: '🌊 ホワイトノイズ', value: 'リラックス用BGM', inline: true }
+      )
+      .setFooter({ text: 'ボタンをクリックするだけで再生開始！' })
+      .setTimestamp(new Date());
+
+    const row1 = new ActionRowBuilder()
+      .addComponents(
+        new ButtonBuilder()
+          .setCustomId('song_vocaloid')
+          .setLabel('🎤 最新ボカロ')
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId('song_kaiju')
+          .setLabel('🦖 怪獣になりたい')
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId('song_iris')
+          .setLabel('🌸 iris out')
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId('song_summer')
+          .setLabel('☀️ お疲れsummer')
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId('song_alpha')
+          .setLabel('🧘 集中アルファ波')
+          .setStyle(ButtonStyle.Primary)
+      );
+
+    const row2 = new ActionRowBuilder()
+      .addComponents(
+        new ButtonBuilder()
+          .setCustomId('song_whitenoise')
+          .setLabel('🌊 ホワイトノイズ')
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId('song_pause')
+          .setLabel('⏸️ 一時停止')
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId('song_skip')
+          .setLabel('⏭️ スキップ')
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId('song_stop')
+          .setLabel('⏹️ 停止')
+          .setStyle(ButtonStyle.Danger)
+      );
+
+    await interaction.reply({ embeds: [embed], components: [row1, row2] });
+  } catch (error) {
+    console.error('showSongMenuでエラーが発生しました', error);
+    await interaction.reply({ content: '❌ メニューの表示に失敗しました。', ephemeral: true });
+  }
+}
+
+// 曲ボタンハンドラー
+async function handleSongButton(interaction, customId) {
+  try {
+    // 音声チャンネルにいるか確認
+    if (!interaction.member.voice.channel) {
+      return await interaction.reply({
+        content: '⚠️ 音声チャンネルに参加してから使用してください！',
+        ephemeral: true
+      });
+    }
+
+    await interaction.deferReply();
+
+    const songs = {
+      'song_vocaloid': {
+        url: 'https://www.youtube.com/watch?v=Qc-XU75Bq_4',
+        name: '🎤 最新ボカロ',
+        emoji: '🎤'
+      },
+      'song_kaiju': {
+        url: 'https://www.youtube.com/watch?v=TbakFPc4ZTw',
+        name: '🦖 怪獣になりたい',
+        emoji: '🦖'
+      },
+      'song_iris': {
+        url: 'https://www.youtube.com/watch?v=LmZD-TU96q4',
+        name: '🌸 iris out',
+        emoji: '🌸'
+      },
+      'song_summer': {
+        url: 'https://www.youtube.com/watch?v=ViFHruS6oO8',
+        name: '☀️ お疲れsummer',
+        emoji: '☀️'
+      },
+      'song_alpha': {
+        url: 'https://www.youtube.com/watch?v=vok6xmB1QEg',
+        name: '🧘 集中アルファ波',
+        emoji: '🧘'
+      },
+      'song_whitenoise': {
+        url: 'https://www.youtube.com/watch?v=5ss2qOtJf4U',
+        name: '🌊 ホワイトノイズ',
+        emoji: '🌊'
+      },
+      'song_pause': {
+        action: 'pause'
+      },
+      'song_skip': {
+        action: 'skip'
+      },
+      'song_stop': {
+        action: 'stop'
+      }
+    };
+
+    const selectedSong = songs[customId];
+
+    if (!selectedSong) {
+      return await interaction.editReply({ content: '❌ 不明なボタンです。' });
+    }
+
+    // アクションボタンの処理
+    if (selectedSong.action === 'pause') {
+      const queue = musicPlayer.getQueueInfo(interaction.guildId);
+      if (!queue.isPlaying) {
+        return await interaction.editReply({ content: '⚠️ 現在再生中の曲はありません！' });
+      }
+
+      const success = musicPlayer.pause(interaction.guildId);
+      if (!success) {
+        return await interaction.editReply({ content: '⚠️ 一時停止に失敗しました！' });
+      }
+
+      const embed = new EmbedBuilder()
+        .setColor(COLOR_PRIMARY)
+        .setTitle('⏸️ 一時停止しました')
+        .setDescription('`/resume` または `/song` メニューで再開できます')
+        .setTimestamp(new Date());
+
+      return await interaction.editReply({ embeds: [embed] });
+    }
+
+    if (selectedSong.action === 'skip') {
+      const queue = musicPlayer.getQueueInfo(interaction.guildId);
+      if (!queue.isPlaying) {
+        return await interaction.editReply({ content: '⚠️ 現在再生中の曲はありません！' });
+      }
+
+      musicPlayer.skip(interaction.guildId);
+
+      const embed = new EmbedBuilder()
+        .setColor(COLOR_PRIMARY)
+        .setTitle('⏭️ スキップしました')
+        .setDescription('次の曲を再生します')
+        .setTimestamp(new Date());
+
+      return await interaction.editReply({ embeds: [embed] });
+    }
+
+    if (selectedSong.action === 'stop') {
+      const success = musicPlayer.stop(interaction.guildId);
+      if (!success) {
+        return await interaction.editReply({ content: '⚠️ 現在再生中の曲はありません！' });
+      }
+
+      const embed = new EmbedBuilder()
+        .setColor(COLOR_DANGER)
+        .setTitle('⏹️ 停止しました')
+        .setDescription('音声チャンネルから退出しました')
+        .setTimestamp(new Date());
+
+      return await interaction.editReply({ embeds: [embed] });
+    }
+
+    // 曲を追加
+    const song = await musicPlayer.addSong(interaction, selectedSong.url);
+
+    if (!song) return;
+
+    const queue = musicPlayer.getQueueInfo(interaction.guildId);
+
+    if (queue.songs.length === 1) {
+      // 最初の曲なので再生開始
+      await musicPlayer.play(interaction);
+
+      const embed = new EmbedBuilder()
+        .setColor(COLOR_PRIMARY)
+        .setTitle(`${selectedSong.emoji} 再生開始！`)
+        .setDescription(`**${selectedSong.name}**\n[${song.title}](${song.url})`)
+        .addFields(
+          { name: '⏱️ 長さ', value: formatDuration(song.duration), inline: true },
+          { name: '👤 リクエスト', value: interaction.user.username, inline: true }
+        )
+        .setTimestamp(new Date());
+
+      // サムネイルが有効なURLの場合のみ設定
+      if (song.thumbnail && song.thumbnail.startsWith('http')) {
+        embed.setThumbnail(song.thumbnail);
+      }
+
+      await interaction.editReply({ embeds: [embed] });
+    } else {
+      // キューに追加
+      const embed = new EmbedBuilder()
+        .setColor(COLOR_SUCCESS)
+        .setTitle(`${selectedSong.emoji} キューに追加！`)
+        .setDescription(`**${selectedSong.name}**\n[${song.title}](${song.url})`)
+        .addFields(
+          { name: '📝 キュー位置', value: `${queue.songs.length}番目`, inline: true },
+          { name: '⏱️ 長さ', value: formatDuration(song.duration), inline: true }
+        )
+        .setTimestamp(new Date());
+
+      // サムネイルが有効なURLの場合のみ設定
+      if (song.thumbnail && song.thumbnail.startsWith('http')) {
+        embed.setThumbnail(song.thumbnail);
+      }
+
+      await interaction.editReply({ embeds: [embed] });
+    }
+  } catch (error) {
+    console.error('handleSongButtonでエラーが発生しました', error);
+
+    if (interaction.deferred) {
+      await interaction.editReply({ content: '❌ 曲の再生に失敗しました。' });
+    } else {
+      await interaction.reply({ content: '❌ 曲の再生に失敗しました。', ephemeral: true });
+    }
   }
 }
