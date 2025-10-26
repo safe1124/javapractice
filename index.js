@@ -495,10 +495,45 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
           if (managementChannel && managementChannel.isTextBased()) {
             try {
               const earnedMoney = totalMinutes * 100;
+
+              // 当日の累積勉強時間を取得
+              const { data: todayData, error: todayError } = await supabase
+                .from('study_records')
+                .select('total_minutes')
+                .eq('user_id', userId)
+                .eq('date', dateKey);
+
+              let todayTotal = 0;
+              if (!todayError && todayData) {
+                todayTotal = todayData.reduce((sum, row) => sum + row.total_minutes, 0);
+              }
+
+              // 満点（120分）までの残り時間を計算
+              const targetMinutes = 120;
+              const remainingMinutes = Math.max(0, targetMinutes - todayTotal);
+
+              // ティアを計算
+              let tier = '';
+              if (todayTotal <= 10) {
+                tier = 'C';
+              } else if (todayTotal <= 20) {
+                tier = 'B';
+              } else if (todayTotal <= 30) {
+                tier = 'A';
+              } else if (todayTotal <= 60) {
+                tier = 'S';
+              } else if (todayTotal <= 90) {
+                tier = 'SS';
+              } else if (todayTotal <= 120) {
+                tier = 'SSS';
+              } else {
+                tier = 'SSS+';
+              }
+
               const exitEmbed = new EmbedBuilder()
                 .setColor(COLOR_PRIMARY)
                 .setTitle('📵 退出')
-                .setDescription(`<@${userId}> がstudyroomから退出しました`)
+                .setDescription(`<@${userId}> がstudyroomから退出しました\n\n今日の勉強累積時間は${formatMinutes(todayTotal)}なので **${tier}** に達成しました`)
                 .addFields(
                   {
                     name: '勉強時間',
@@ -509,11 +544,23 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
                     name: '獲得金額',
                     value: `💰 ${earnedMoney.toLocaleString()}円`,
                     inline: true
+                  },
+                  {
+                    name: '本日の累計',
+                    value: `📚 ${formatMinutes(todayTotal)}`,
+                    inline: true
+                  },
+                  {
+                    name: '満点まで',
+                    value: remainingMinutes > 0
+                      ? `⏰ あと${formatMinutes(remainingMinutes)}`
+                      : `🎉 満点達成！`,
+                    inline: true
                   }
                 )
                 .setThumbnail(newState.member.user.displayAvatarURL())
                 .setTimestamp(new Date());
-              
+
               await managementChannel.send({ embeds: [exitEmbed] });
               console.log(`✅ 退出メッセージを${MANAGEMENT_CHANNEL_NAME}に送信しました`);
             } catch (msgError) {
