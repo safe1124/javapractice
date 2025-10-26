@@ -1194,8 +1194,14 @@ async function showStats(interaction) {
     const lastWeekKey = getWeekKey(lastWeekDate);
 
     // すべてのクエリを並列実行
+    // 昨日と一昨日の日付キー
+    const yesterdayKey = getDateKey(nowDate.subtract(1, 'day'));
+    const dayBeforeYesterdayKey = getDateKey(nowDate.subtract(2, 'day'));
+
     const [
       { data: todayData, error: todayError },
+      { data: yesterdayData },
+      { data: dayBeforeYesterdayData },
       { data: weeklyData },
       { data: weekData, error: weekError },
       { data: lastWeekData },
@@ -1210,6 +1216,18 @@ async function showStats(interaction) {
         .select('total_minutes, start_time, end_time')
         .eq('user_id', userId)
         .eq('date', dateKey),
+      // 昨日のデータ
+      supabase
+        .from('study_records')
+        .select('total_minutes')
+        .eq('user_id', userId)
+        .eq('date', yesterdayKey),
+      // 一昨日のデータ
+      supabase
+        .from('study_records')
+        .select('total_minutes')
+        .eq('user_id', userId)
+        .eq('date', dayBeforeYesterdayKey),
       // 今週全体のデータ（グラフ用）
       supabase
         .from('study_records')
@@ -1262,11 +1280,46 @@ async function showStats(interaction) {
     if (userError) throw userError;
     if (totalStudyError) throw totalStudyError;
 
-    // 今日の合計と最高集中力
+    // 今日、昨日、一昨日の合計
     const todayTotal = todayData.reduce((sum, row) => sum + row.total_minutes, 0);
+    const yesterdayTotal = yesterdayData ? yesterdayData.reduce((sum, row) => sum + row.total_minutes, 0) : 0;
+    const dayBeforeYesterdayTotal = dayBeforeYesterdayData ? dayBeforeYesterdayData.reduce((sum, row) => sum + row.total_minutes, 0) : 0;
+
     let maxFocusMinutes = 0;
     if (todayData.length > 0) {
       maxFocusMinutes = Math.max(...todayData.map(row => row.total_minutes));
+    }
+
+    // 昨日との比較
+    let yesterdayComparisonText = 'データなし';
+    if (yesterdayTotal > 0) {
+      const diff = todayTotal - yesterdayTotal;
+      const percentage = Math.round((diff / yesterdayTotal) * 100);
+      if (percentage > 0) {
+        yesterdayComparisonText = `⬆ +${percentage}%`;
+      } else if (percentage < 0) {
+        yesterdayComparisonText = `⬇ ${percentage}%`;
+      } else {
+        yesterdayComparisonText = `➖ 0%`;
+      }
+    } else if (todayTotal > 0) {
+      yesterdayComparisonText = `⬆ +100%`;
+    }
+
+    // 一昨日との比較
+    let dayBeforeYesterdayComparisonText = 'データなし';
+    if (dayBeforeYesterdayTotal > 0) {
+      const diff = todayTotal - dayBeforeYesterdayTotal;
+      const percentage = Math.round((diff / dayBeforeYesterdayTotal) * 100);
+      if (percentage > 0) {
+        dayBeforeYesterdayComparisonText = `⬆ +${percentage}%`;
+      } else if (percentage < 0) {
+        dayBeforeYesterdayComparisonText = `⬇ ${percentage}%`;
+      } else {
+        dayBeforeYesterdayComparisonText = `➖ 0%`;
+      }
+    } else if (todayTotal > 0) {
+      dayBeforeYesterdayComparisonText = `⬆ +100%`;
     }
 
     // 曜日ごとに集計
@@ -1358,13 +1411,77 @@ async function showStats(interaction) {
     // ティア色を優先的に適用（カスタマイズ色より優先）
     embedColor = getTierColor(currentTier);
 
-    // 週間グラフを作成
+    // 週間グラフを作成（10分単位で12個の棒 = 120分満タン）
     const dayNames = ['月', '火', '水', '木', '金', '土', '日'];
-    const maxMinutes = Math.max(...weeklyGraph.map(d => d.minutes), 1);
     const weeklyGraphText = weeklyGraph.map((data, index) => {
-      const barLength = Math.round((data.minutes / maxMinutes) * 10);
-      const bar = '█'.repeat(barLength) + '░'.repeat(10 - barLength);
+      // 10分単位で12個の棒（120分で満タン）
+      const barLength = Math.min(Math.floor(data.minutes / 10), 12);
+      const bar = '█'.repeat(barLength) + '░'.repeat(12 - barLength);
       return `${dayNames[index]}: ${bar} ${data.minutes}m`;
+    }).join('\n');
+
+    // 当日の時間別グラフを作成 (9時から23時まで、5分単位で12スロット)
+    const hourlyGraph = Array(15).fill(null).map(() => Array(12).fill(false)); // 15時間 x 12スロット
+    const hourlySeconds = Array(15).fill(0); // 各時間の実際の勉強秒数を記録
+
+    console.log('📊 時間別グラフ作成: todayData.length =', todayData.length);
+
+    todayData.forEach(record => {
+      if (!record.start_time || !record.end_time) {
+        console.log('⚠️ start_time または end_time が null です');
+        return;
+      }
+
+      // UTC時間に9時間を加算してJST時間に変換
+      const startTimeUTC = dayjs.utc(record.start_time);
+      const endTimeUTC = dayjs.utc(record.end_time);
+      const startTime = startTimeUTC.add(9, 'hour');
+      const endTime = endTimeUTC.add(9, 'hour');
+
+      console.log(`📝 Record: ${startTime.format('HH:mm:ss')} ~ ${endTime.format('HH:mm:ss')}`);
+
+      // 開始時刻と終了時刻を秒単位で計算
+      const startSeconds = startTime.hour() * 3600 + startTime.minute() * 60 + startTime.second();
+      const endSeconds = endTime.hour() * 3600 + endTime.minute() * 60 + endTime.second();
+
+      // 9時から23時までの各5分スロットをチェック
+      for (let hour = 9; hour <= 23; hour++) {
+        const hourIndex = hour - 9;
+
+        for (let slot = 0; slot < 12; slot++) {
+          // このスロットの開始と終了時刻（秒単位）
+          const slotStartSeconds = hour * 3600 + slot * 300; // 5分 = 300秒
+          const slotEndSeconds = slotStartSeconds + 300;
+
+          // 勉強時間とスロットが重なっているかチェック
+          if (startSeconds < slotEndSeconds && endSeconds > slotStartSeconds) {
+            hourlyGraph[hourIndex][slot] = true;
+            console.log(`  ✅ ${hour}時${slot * 5}分スロット: 記録`);
+          }
+        }
+
+        // この時間帯(hour)での実際の勉強秒数を計算
+        const hourStartSeconds = hour * 3600;
+        const hourEndSeconds = (hour + 1) * 3600;
+
+        if (startSeconds < hourEndSeconds && endSeconds > hourStartSeconds) {
+          // この時間帯と勉強時間が重なっている
+          const overlapStart = Math.max(startSeconds, hourStartSeconds);
+          const overlapEnd = Math.min(endSeconds, hourEndSeconds);
+          const overlapSeconds = overlapEnd - overlapStart;
+          hourlySeconds[hourIndex] += overlapSeconds;
+        }
+      }
+    });
+
+    // 時間別グラフテキストを生成
+    const hourlyGraphText = hourlyGraph.map((slots, index) => {
+      const hour = index + 9;
+      const bar = slots.map(filled => filled ? '█' : '░').join('');
+      const totalSeconds = hourlySeconds[index];
+      const minutes = Math.floor(totalSeconds / 60);
+      const seconds = totalSeconds % 60;
+      return `${hour.toString().padStart(2, '0')}時: ${bar} ${minutes}m ${seconds}s`;
     }).join('\n');
 
     // 先週比を計算
@@ -1401,13 +1518,18 @@ async function showStats(interaction) {
           inline: false
         },
         {
-          name: '📅 今週の学習グラフ',
+          name: '📅 今週の学習グラフ (満点120分)',
           value: '```\n' + weeklyGraphText + '\n```',
           inline: false
         },
         {
+          name: '⏰ 今日の時間別グラフ (9-23時)',
+          value: '```\n' + hourlyGraphText + '\n```',
+          inline: false
+        },
+        {
           name: '📈 学習時間',
-          value: `**今日**: ${todayTotal}分（約${Math.floor(todayTotal / 60)}時間${todayTotal % 60}分）\n**今週**: ${weekTotal}分（約${Math.floor(weekTotal / 60)}時間${weekTotal % 60}分）\n**今月**: ${monthTotal}分（約${Math.floor(monthTotal / 60)}時間${monthTotal % 60}分）`,
+          value: `**今日**: ${todayTotal}分（約${Math.floor(todayTotal / 60)}時間${todayTotal % 60}分）\n**昨日**: ${yesterdayTotal}分 ${yesterdayComparisonText}\n**一昨日**: ${dayBeforeYesterdayTotal}分 ${dayBeforeYesterdayComparisonText}\n**今週**: ${weekTotal}分（約${Math.floor(weekTotal / 60)}時間${weekTotal % 60}分）\n**今月**: ${monthTotal}分（約${Math.floor(monthTotal / 60)}時間${monthTotal % 60}分）`,
           inline: false
         },
         {
